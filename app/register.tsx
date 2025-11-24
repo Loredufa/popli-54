@@ -37,8 +37,7 @@ export default function RegisterScreen() {
     });
     setLoading(false);
     if (!res.ok) return Alert.alert('No se pudo registrar', res.error);
-    Alert.alert('Cuenta creada', 'Revisa tu correo si corresponde.');
-    router.back();
+    router.replace('/maker');
   };
 
   return (

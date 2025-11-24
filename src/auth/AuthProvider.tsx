@@ -7,12 +7,13 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 const EXTRA = (Constants.expoConfig?.extra as any) || {};
 const API_BASE_URL: string = EXTRA.API_BASE_URL || '';
 
-const LOGIN_PATH    = EXTRA.LOGIN_PATH    || '/api/login';
+const LOGIN_PATH = EXTRA.LOGIN_PATH || '/api/login';
 const REGISTER_PATH = EXTRA.REGISTER_PATH || '/api/register';
-const FORGOT_PATH   = EXTRA.FORGOT_PATH   || '/api/forgot-password';
-const ME_PATH       = EXTRA.ME_PATH       || '/api/me';
-const PROFILE_PATH  = EXTRA.PROFILE_PATH  || '/api/profile';
-const LOGOUT_PATH   = EXTRA.LOGOUT_PATH   || '/api/logout';
+const FORGOT_PATH = EXTRA.FORGOT_PATH || '/api/forgot-password';
+const RESET_PASSWORD_PATH = EXTRA.RESET_PASSWORD_PATH || '/api/auth/reset-password';
+const ME_PATH = EXTRA.ME_PATH || '/api/me';
+const PROFILE_PATH = EXTRA.PROFILE_PATH || '/api/profile';
+const LOGOUT_PATH = EXTRA.LOGOUT_PATH || '/api/logout';
 
 /** ====== Tipos ====== */
 export type User = {
@@ -38,13 +39,15 @@ type AuthContextType = {
   token: string | null;
   loading: boolean;
   /** Auth */
-  login:   (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  register:(form: RegisterForm)              => Promise<{ ok: boolean; error?: string }>;
-  logout:  () => Promise<void>;
-  forgotPassword: (email: string)            => Promise<{ ok: boolean; error?: string }>;
+  login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
+  register: (form: RegisterForm) => Promise<{ ok: boolean; error?: string }>;
+  logout: () => Promise<void>;
+  forgotPassword: (email: string) => Promise<{ ok: boolean; error?: string }>;
+  resetPassword: (email: string, code: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>;
   /** Perfil */
   refreshMe: () => Promise<void>;
   updateProfile: (patch: Record<string, any>) => Promise<{ ok: boolean; error?: string }>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>;
 };
 
 const AuthContext = createContext<AuthContextType>({
@@ -53,20 +56,22 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   login: async () => ({ ok: false, error: 'AuthProvider no inicializado' }),
   register: async () => ({ ok: false, error: 'AuthProvider no inicializado' }),
-  logout: async () => {},
+  logout: async () => { },
   forgotPassword: async () => ({ ok: false, error: 'AuthProvider no inicializado' }),
-  refreshMe: async () => {},
+  resetPassword: async () => ({ ok: false, error: 'AuthProvider no inicializado' }),
+  refreshMe: async () => { },
   updateProfile: async () => ({ ok: false, error: 'AuthProvider no inicializado' }),
+  changePassword: async () => ({ ok: false, error: 'AuthProvider no inicializado' }),
 });
 
 /** ====== Helpers HTTP ====== */
 const STORAGE_TOKEN = 'auth_token';
-const STORAGE_USER  = 'auth_user';
+const STORAGE_USER = 'auth_user';
 
 function baseTo(path: string) {
   if (!API_BASE_URL) throw new Error('Falta API_BASE_URL en app.json (expo.extra).');
   const clean = API_BASE_URL.replace(/\/+$/, '');
-  const root  = /\/api(\/|$)/i.test(clean) ? clean.replace(/\/api.*$/i, '') : clean;
+  const root = /\/api(\/|$)/i.test(clean) ? clean.replace(/\/api.*$/i, '') : clean;
   return `${root}${path}`;
 }
 
@@ -97,16 +102,16 @@ async function requestJSON<T = any>(
   return data as T;
 }
 
-const get  = <T,>(path: string, token?: string)      => requestJSON<T>('GET',  baseTo(path), undefined, token);
+const get = <T,>(path: string, token?: string) => requestJSON<T>('GET', baseTo(path), undefined, token);
 const post = <T,>(path: string, body: any, token?: string) => requestJSON<T>('POST', baseTo(path), body, token);
-const put  = <T,>(path: string, body: any, token?: string) => requestJSON<T>('PUT',  baseTo(path), body, token);
-const del  = <T,>(path: string, token?: string)      => requestJSON<T>('DELETE', baseTo(path), undefined, token);
+const put = <T,>(path: string, body: any, token?: string) => requestJSON<T>('PUT', baseTo(path), body, token);
+const del = <T,>(path: string, token?: string) => requestJSON<T>('DELETE', baseTo(path), undefined, token);
 
 /** ====== Provider ====== */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser]     = useState<User | null>(null);
-  const [token, setToken]   = useState<string | null>(null);
-  const [loading, setLoad]  = useState(true);
+  const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [loading, setLoad] = useState(true);
 
   // Restaurar sesión al abrir
   useEffect(() => {
@@ -165,18 +170,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         REGISTER_PATH,
         {
           first_name: form.first_name.trim(),
-          last_name : form.last_name.trim(),
-          email     : form.email.trim().toLowerCase(),
-          country   : form.country.trim(),
-          phone     : (form.phone || '').trim(),
-          language  : form.language.trim(),
-          password  : form.password,
+          last_name: form.last_name.trim(),
+          email: form.email.trim().toLowerCase(),
+          country: form.country.trim(),
+          phone: (form.phone || '').trim(),
+          language: form.language.trim(),
+          password: form.password,
         }
       );
-      // Si la API devuelve token+user (registro + login), persistimos;
-      // si solo devuelve user_id, dejamos al front en estado "no logueado".
-      if (data?.token && data?.user) {
-        await persistSession(data.token, data.user);
+      if (data?.token) {
+        let nextUser = data.user;
+        if (!nextUser) {
+          try {
+            nextUser = await get<User>(ME_PATH, data.token);
+          } catch {
+            if (data.user_id) {
+              nextUser = {
+                id: data.user_id,
+                email: form.email.trim().toLowerCase(),
+                first_name: form.first_name.trim(),
+                last_name: form.last_name.trim(),
+                country: form.country.trim(),
+                phone: (form.phone || '').trim(),
+                language: form.language.trim(),
+              };
+            }
+          }
+        }
+        if (nextUser) {
+          await persistSession(data.token, nextUser);
+        }
       }
       return { ok: true };
     } catch (e: any) {
@@ -190,6 +213,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { ok: true };
     } catch (e: any) {
       return { ok: false, error: e.message || 'No se pudo enviar el enlace' };
+    }
+  };
+
+  const resetPassword: AuthContextType['resetPassword'] = async (email, code, newPassword) => {
+    try {
+      await post(RESET_PASSWORD_PATH, { email: email.trim().toLowerCase(), code, newPassword });
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: e.message || 'No se pudo restablecer la contraseña' };
     }
   };
 
@@ -233,8 +265,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const changePassword: AuthContextType['changePassword'] = async (currentPassword, newPassword) => {
+    try {
+      if (!token) throw new Error('No hay sesión');
+      await post('/api/auth/change-password', { currentPassword, newPassword }, token);
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: e.message || 'No se pudo cambiar la contraseña' };
+    }
+  };
+
   const value = useMemo(
-    () => ({ user, token, loading, login, register, logout, forgotPassword, refreshMe, updateProfile }),
+    () => ({ user, token, loading, login, register, logout, forgotPassword, resetPassword, refreshMe, updateProfile, changePassword }),
     [user, token, loading]
   );
 
@@ -258,8 +300,7 @@ export function AuthGate({
 }) {
   const { loading, user } = useAuth();
   if (loading) return <>{loadingFallback ?? null}</>;
-  if (!user)  return <>{fallback ?? null}</>;
+  if (!user) return <>{fallback ?? null}</>;
   return <>{children}</>;
 }
-
 

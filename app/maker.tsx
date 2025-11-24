@@ -2,14 +2,14 @@
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { router, type Href } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as React from 'react';
 import {
-    ActivityIndicator, Alert, Image, Pressable, ScrollView, Share, Text, TextInput, View,
+  ActivityIndicator, Alert, Image, Pressable, ScrollView, Share, Text, TextInput, View, Platform,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { FadeInUp } from 'react-native-reanimated';
@@ -28,20 +28,16 @@ const THEME = {
   primary: '#5aa0ff',
   accent: '#9fd2ff',
 };
-
 const HOME_ROUTE = '/(tabs)/index' as Href;
 const LOGIN_ROUTE = '/login' as Href;
-const MENU_ITEMS: NavbarMenuItem[] = [
-  { label: 'Inicio', icon: 'home', href: HOME_ROUTE, replace: true },
-  { label: 'Explorar', icon: 'compass', href: '/(tabs)/explore' as Href },
-  { label: 'Generador', icon: 'edit-3', href: '/maker' as Href, replace: true },
-  { label: 'Ayuda', icon: 'help-circle', href: '/modal' as Href },
-  { label: 'Cerrar sesion', icon: 'log-out', action: 'logout' },
-];
+import { MENU_ITEMS } from '../src/constants/menu';
+
+
+
 
 /* ------------- HABILIDADES ------------- */
 const SKILLS = [
-  'Identificar emociones','Tolerancia a la frustracion','Empatia','Pedir ayuda','Asertividad','Compartir/turnos','Gratitud','Perseverancia','Cooperacion','Escucha activa','Autocontrol','Resolucion de conflictos','Autoestima','Amabilidad','Mindfulness/respiracion','Regulacion del miedo','Gestion de celos','Adaptacion a cambios','Curiosidad segura','Cuidado del entorno',
+  'Identificar emociones', 'Tolerancia a la frustracion', 'Empatia', 'Pedir ayuda', 'Asertividad', 'Compartir/turnos', 'Gratitud', 'Perseverancia', 'Cooperacion', 'Escucha activa', 'Autocontrol', 'Resolucion de conflictos', 'Autoestima', 'Amabilidad', 'Mindfulness/respiracion', 'Regulacion del miedo', 'Gestion de celos', 'Adaptacion a cambios', 'Curiosidad segura', 'Cuidado del entorno',
 ];
 
 /* ----- Edad ----- */
@@ -52,8 +48,9 @@ const AGE_OPTIONS = [
 
 /* ---- Semillas filosoficas (solo 6-10) ---- */
 const PHILO_SEEDS = [
-  'amistad y justicia','verdad vs opinion','responsabilidad y consecuencias','identidad y cambio','perspectivas multiples','reglas y acuerdos','bien comun',
+  'amistad y justicia', 'verdad vs opinion', 'responsabilidad y consecuencias', 'identidad y cambio', 'perspectivas multiples', 'reglas y acuerdos', 'bien comun',
 ];
+
 function themeWithPhilosophy(theme: string, age: '2-5' | '6-10') {
   if (age !== '6-10') return theme;
   return `${theme}. Integra de forma sutil semillas filosoficas apropiadas para 6-10: ${PHILO_SEEDS.join(', ')}. Usa metaforas, micro-dilemas amables y 1-2 preguntas abiertas de un mentor; evita sermonear y no menciones la palabra "filosofia".`;
@@ -62,33 +59,95 @@ function themeWithPhilosophy(theme: string, age: '2-5' | '6-10') {
 /* ---------------- HELPERS ---------------- */
 function extractJsonBlock(text: string) {
   const fence = /```json([\s\S]*?)```/i.exec(text);
-  if (fence?.[1]) try { return JSON.parse(fence[1]); } catch {}
+  if (fence?.[1]) try { return JSON.parse(fence[1]); } catch { }
   const brace = text.match(/\{[\s\S]*\}$/m);
-  if (brace) try { return JSON.parse(brace[0]); } catch {}
+  if (brace) try { return JSON.parse(brace[0]); } catch { }
   return null;
 }
 function stripJsonBlock(text: string) {
   return text.replace(/```json[\s\S]*?```/gi, '').replace(/\{[\s\S]*\}$/m, '').trim();
 }
-function baseTo(path: string) {
-  const base = (Constants.expoConfig?.extra as any)?.API_BASE_URL as string | undefined;
-  if (!base) throw new Error('Falta API_BASE_URL en app.json (expo.extra).');
-  const clean = base.replace(/\/+$/, '');
-  const root = /\/api(\/|$)/i.test(clean) ? clean.replace(/\/api.*$/i, '') : clean;
-  return `${root}${path}`;
+const WEB_PROXY_PATH = ((Constants.expoConfig?.extra as any)?.WEB_PROXY_PATH as string) || '/proxy-api';
+const API_EXTRA = (Constants.expoConfig?.extra as any) || {};
+
+const WEB_PROXY_PORTS = ['19006', '19007', '19008'];
+
+function shouldUseWebProxy() {
+  if (Platform.OS !== 'web') return false;
+  if (process?.env?.EXPO_PUBLIC_DISABLE_WEB_PROXY === '1') return false;
+  const hostname = typeof window !== 'undefined' ? window.location.hostname : undefined;
+  const port = typeof window !== 'undefined' ? window.location.port : undefined;
+  if (!hostname || !['localhost', '127.0.0.1', '::1'].includes(hostname)) return false;
+  if (!port) return false;
+  return WEB_PROXY_PORTS.includes(port);
 }
-async function callBackend(payload: any): Promise<string> {
-  const res = await fetch(baseTo('/api/story'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  if (!res.ok) {
-    const ct = res.headers.get('content-type') || '';
-    let msg = `API ${res.status}`;
-    if (ct.includes('application/json')) {
-      const d = await res.json().catch(() => ({} as any));
-      if ((d as any)?.error) msg += `: ${(d as any).error}`;
-    }
-    throw new Error(msg);
+
+function normalizePath(path: string) {
+  return path.startsWith('/') ? path : `/${path}`;
+}
+
+function resolveDirectRoot() {
+  const apiBase = API_EXTRA.API_BASE_URL as string | undefined;
+  if (!apiBase) throw new Error('Falta API_BASE_URL en app.json (expo.extra).');
+  if (/^https?:/i.test(apiBase)) {
+    const clean = apiBase.replace(/\/+$/, '');
+    return /\/api(\/|$)/i.test(clean) ? clean.replace(/\/api.*$/i, '') : clean;
   }
-  const { content } = await res.json();
+  return apiBase.endsWith('/') ? apiBase.slice(0, -1) : apiBase;
+}
+
+const DIRECT_ROOT = resolveDirectRoot();
+
+function directUrl(path: string) {
+  return `${DIRECT_ROOT}${normalizePath(path)}`;
+}
+
+function proxyUrl(path: string) {
+  return `${WEB_PROXY_PATH}${normalizePath(path)}`;
+}
+
+type FetchJSONOptions = {
+  allowProxy?: boolean;
+};
+
+async function fetchJSON<T>(path: string, body: any, opts: FetchJSONOptions = {}): Promise<T> {
+  const attempts: Array<{ url: string; retryOnNotFound: boolean }> = [];
+  if (opts.allowProxy && shouldUseWebProxy()) {
+    attempts.push({ url: proxyUrl(path), retryOnNotFound: true });
+  }
+  attempts.push({ url: directUrl(path), retryOnNotFound: false });
+
+  let lastErr: any = null;
+  for (const attempt of attempts) {
+    try {
+      const res = await fetch(attempt.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const ct = res.headers.get('content-type') || '';
+        let msg = `API ${res.status}`;
+        if (ct.includes('application/json')) {
+          const d = await res.json().catch(() => ({} as any));
+          if ((d as any)?.error) msg += `: ${(d as any).error}`;
+        }
+        const error: any = new Error(msg);
+        error.code = res.status;
+        throw error;
+      }
+      return (await res.json()) as T;
+    } catch (err: any) {
+      lastErr = err;
+      const shouldRetry = attempt.retryOnNotFound && (err?.code === 404 || err?.message?.includes('404'));
+      if (!shouldRetry) break;
+    }
+  }
+  throw lastErr ?? new Error('No se pudo contactar con la API');
+}
+
+async function callBackend(payload: any): Promise<string> {
+  const { content } = await fetchJSON<{ content?: string }>('/api/story', payload, { allowProxy: true });
   return (content || '').trim();
 }
 type IllustrationSlot = 'intro' | 'conflict' | 'resolution';
@@ -109,17 +168,7 @@ async function callIllustrations(payload: {
   beats?: Array<{ slot: IllustrationSlot; label: string; excerpt: string; order: number }>;
   count?: number;
 }): Promise<string[]> {
-  const res = await fetch(baseTo('/api/illustrate'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  if (!res.ok) {
-    const ct = res.headers.get('content-type') || '';
-    let msg = `API ${res.status}`;
-    if (ct.includes('application/json')) {
-      const d = await res.json().catch(() => ({} as any));
-      if ((d as any)?.error) msg += `: ${(d as any).error}`;
-    }
-    throw new Error(msg);
-  }
-  const { images } = await res.json();
+  const { images } = await fetchJSON<{ images?: string[] }>('/api/illustrate', payload, { allowProxy: true });
   return Array.isArray(images) ? images : [];
 }
 
@@ -188,6 +237,75 @@ function extToMime(ext: string) {
   }
 }
 
+const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+function bytesToBase64(bytes: Uint8Array) {
+  let output = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b1 = bytes[i];
+    const b2 = bytes[i + 1];
+    const b3 = bytes[i + 2];
+    const hasB2 = i + 1 < bytes.length;
+    const hasB3 = i + 2 < bytes.length;
+    const triplet = (b1 << 16) | ((hasB2 ? b2 : 0) << 8) | (hasB3 ? b3 : 0);
+    const enc1 = (triplet >> 18) & 0x3f;
+    const enc2 = (triplet >> 12) & 0x3f;
+    const enc3 = (triplet >> 6) & 0x3f;
+    const enc4 = triplet & 0x3f;
+    output += BASE64_CHARS[enc1];
+    output += BASE64_CHARS[enc2];
+    output += hasB2 ? BASE64_CHARS[enc3] : '=';
+    output += hasB3 ? BASE64_CHARS[enc4] : '=';
+  }
+  return output;
+}
+
+async function readFileAsDataUri(path: string, mime: string) {
+  const base64 = await FileSystem.readAsStringAsync(path, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  return `data:${mime};base64,${base64}`;
+}
+
+async function fetchAsBase64(uri: string) {
+  const res = await fetch(uri);
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  const buffer = await res.arrayBuffer();
+  return bytesToBase64(new Uint8Array(buffer));
+}
+
+async function remoteUriToDataUri(uri: string, mime: string, slot: IllustrationSlot, idx: number) {
+  if (FileSystem.documentDirectory || FileSystem.cacheDirectory) {
+    const ext = guessImageExtension(uri);
+    const tempFile = `${ILLUSTRATION_DIR}${slugify(`${slot}`)}-pdf-${Date.now()}-${idx}.${ext}`;
+    await ensureDir(ILLUSTRATION_DIR);
+    await FileSystem.downloadAsync(uri, tempFile);
+    try {
+      return await readFileAsDataUri(tempFile, mime);
+    } finally {
+      await FileSystem.deleteAsync(tempFile, { idempotent: true }).catch(() => { });
+    }
+  }
+
+  const base64 = await fetchAsBase64(uri);
+  return `data:${mime};base64,${base64}`;
+}
+
+async function ensureDataUri(uri: string, slot: IllustrationSlot, idx: number) {
+  if (uri.startsWith('data:')) return uri;
+  const ext = guessImageExtension(uri);
+  const mime = extToMime(ext);
+  if (uri.startsWith('file://')) {
+    return readFileAsDataUri(uri, mime);
+  }
+  if (/^https?:/i.test(uri)) {
+    return remoteUriToDataUri(uri, mime, slot, idx);
+  }
+  return uri;
+}
+
 async function persistIllustrationAsset(uri: string, slot: IllustrationSlot, index: number) {
   if (!FileSystem.documentDirectory && !FileSystem.cacheDirectory) return uri;
   await ensureDir(ILLUSTRATION_DIR);
@@ -238,7 +356,7 @@ async function deleteFileQuiet(uri?: string | null) {
   if (!uri) return;
   try {
     await FileSystem.deleteAsync(uri, { idempotent: true });
-  } catch {}
+  } catch { }
 }
 
 async function persistStoryMetadataFile(data: SavedStoryMetadata) {
@@ -264,14 +382,14 @@ async function normalizeStoredIndexItem(raw: any): Promise<SavedStoryIndexItem |
   const metaSummary =
     metaSummarySource && typeof metaSummarySource === 'object'
       ? {
-          age_range:
-            typeof metaSummarySource.age_range === 'string'
-              ? metaSummarySource.age_range
-              : undefined,
-          skill:
-            typeof metaSummarySource.skill === 'string' ? metaSummarySource.skill : undefined,
-          tone: typeof metaSummarySource.tone === 'string' ? metaSummarySource.tone : undefined,
-        }
+        age_range:
+          typeof metaSummarySource.age_range === 'string'
+            ? metaSummarySource.age_range
+            : undefined,
+        skill:
+          typeof metaSummarySource.skill === 'string' ? metaSummarySource.skill : undefined,
+        tone: typeof metaSummarySource.tone === 'string' ? metaSummarySource.tone : undefined,
+      }
       : undefined;
 
   if (!metadataUri && (typeof raw.story === 'string' || Array.isArray(raw.illustrations))) {
@@ -283,10 +401,10 @@ async function normalizeStoredIndexItem(raw: any): Promise<SavedStoryIndexItem |
       meta: raw.meta && typeof raw.meta === 'object' ? raw.meta : undefined,
       illustrations: Array.isArray(raw.illustrations)
         ? raw.illustrations.map((item: any) => ({
-            slot: item?.slot ?? 'intro',
-            label: typeof item?.label === 'string' ? item.label : '',
-            uri: item?.uri ?? null,
-          }))
+          slot: item?.slot ?? 'intro',
+          label: typeof item?.label === 'string' ? item.label : '',
+          uri: item?.uri ?? null,
+        }))
         : [],
       fileUri,
     };
@@ -382,15 +500,15 @@ const Chip: React.FC<{ label: string; selected?: boolean; onPress?: () => void }
   </Pressable>
 );
 const PrimaryButton: React.FC<{ label: string; icon?: keyof typeof Feather.glyphMap; disabled?: boolean; onPress?: () => void }> =
-({ label, icon = 'moon', disabled, onPress }) => (
-  <Pressable onPress={onPress} disabled={disabled} style={({ pressed }) => ({
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: disabled ? '#2a3d63' : THEME.primary,
-    paddingVertical: 14, borderRadius: 14, shadowColor: THEME.primary, shadowOpacity: pressed ? 0.15 : 0.35, shadowOffset: { width: 0, height: 8 }, shadowRadius: 14,
-  })}>
-    <Feather name={icon} size={18} color="#0b1226" style={{ marginRight: 8 }} />
-    <Text style={{ color: '#0b1226', fontWeight: '700', fontSize: 16 }}>{label}</Text>
-  </Pressable>
-);
+  ({ label, icon = 'moon', disabled, onPress }) => (
+    <Pressable onPress={onPress} disabled={disabled} style={({ pressed }) => ({
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: disabled ? '#2a3d63' : THEME.primary,
+      paddingVertical: 14, borderRadius: 14, shadowColor: THEME.primary, shadowOpacity: pressed ? 0.15 : 0.35, shadowOffset: { width: 0, height: 8 }, shadowRadius: 14,
+    })}>
+      <Feather name={icon} size={18} color="#0b1226" style={{ marginRight: 8 }} />
+      <Text style={{ color: '#0b1226', fontWeight: '700', fontSize: 16 }}>{label}</Text>
+    </Pressable>
+  );
 
 /* -------------------- SCREEN -------------------- */
 export default function MakerScreen() {
@@ -471,10 +589,9 @@ export default function MakerScreen() {
   }, [imgLoading, hasIllustrations]);
 
   const renderIllustrationItem = (item: IllustrationResult, key: string) => {
-    const waiting = !item.uri;
-    return (
-      <View key={key} style={{ marginVertical: 12 }}>
-        {waiting ? (
+    if (!item.uri) {
+      return (
+        <View key={key} style={{ marginVertical: 12 }}>
           <View style={{ borderWidth: 1, borderColor: THEME.border, borderRadius: 14, padding: 16, alignItems: 'center', backgroundColor: 'rgba(11,18,38,0.3)' }}>
             {imgLoading ? (
               <ActivityIndicator color={THEME.accent} style={{ marginBottom: 8 }} />
@@ -485,13 +602,17 @@ export default function MakerScreen() {
               {imgLoading ? 'Generando ilustracion...' : `Ilustracion pendiente: ${item.label}`}
             </Text>
           </View>
-        ) : (
-          <Image
-            source={{ uri: item.uri }}
-            style={{ width: '100%', height: 220, borderRadius: 14, borderWidth: 1, borderColor: THEME.border, backgroundColor: 'rgba(255,255,255,0.05)' }}
-            resizeMode='cover'
-          />
-        )}
+        </View>
+      );
+    }
+
+    return (
+      <View key={key} style={{ marginVertical: 12 }}>
+        <Image
+          source={{ uri: item.uri }}
+          style={{ width: '100%', height: 220, borderRadius: 14, borderWidth: 1, borderColor: THEME.border, backgroundColor: 'rgba(255,255,255,0.05)' }}
+          resizeMode='cover'
+        />
       </View>
     );
   };
@@ -500,34 +621,11 @@ export default function MakerScreen() {
     const baseTitle = theme?.trim() || DEFAULT_STORY_TITLE;
     const displayTitle = `${baseTitle} ${BRAND_SUFFIX}`;
     const escapedDisplayTitle = escapeHtml(displayTitle);
-    const storyBlocks = (paragraphs.length ? paragraphs : (storyText ? [storyText.trim()] : []))
-      .map((block) => `<p class="paragraph">${escapeHtml(block)}</p>`)
-      .join('\n');
-
     const imagesHtmlParts: string[] = [];
     for (const [idx, item] of planWithResults.entries()) {
       if (!item.uri) continue;
       try {
-        let dataUri = item.uri;
-        if (item.uri.startsWith('file://')) {
-          const ext = guessImageExtension(item.uri);
-          const mime = extToMime(ext);
-          const b64 = await FileSystem.readAsStringAsync(item.uri, {
-            encoding: FileSystem.EncodingType.Base64,
-          });
-          dataUri = `data:${mime};base64,${b64}`;
-        } else if (/^https?:/i.test(item.uri)) {
-          const ext = guessImageExtension(item.uri);
-          const tempFile = `${ILLUSTRATION_DIR}${slugify(item.slot)}-pdf-${Date.now()}-${idx}.${ext}`;
-          await ensureDir(ILLUSTRATION_DIR);
-          await FileSystem.downloadAsync(item.uri, tempFile);
-          const mime = extToMime(ext);
-          const b64 = await FileSystem.readAsStringAsync(tempFile, {
-            encoding: FileSystem.EncodingType.Base64,
-          });
-          dataUri = `data:${mime};base64,${b64}`;
-          await FileSystem.deleteAsync(tempFile, { idempotent: true });
-        }
+        const dataUri = await ensureDataUri(item.uri, item.slot, idx);
         imagesHtmlParts.push(`
           <div class="image-block">
             <img src="${dataUri}" alt="${escapeHtml(item.label)}-${idx + 1}" />
@@ -538,9 +636,31 @@ export default function MakerScreen() {
       }
     }
 
+    const paragraphSource = paragraphs.length ? paragraphs : (storyText ? [storyText.trim()] : []);
+    const paragraphBlocks = paragraphSource
+      .map((block) => `<p class="paragraph">${escapeHtml(block)}</p>`);
+
+    const chunkSize = 4;
+    const pageBlocks: string[] = [];
+    for (let i = 0; i < paragraphBlocks.length; i += chunkSize) {
+      pageBlocks.push(`<div class="page">${paragraphBlocks.slice(i, i + chunkSize).join('\n')}</div>`);
+    }
+    if (!pageBlocks.length) {
+      pageBlocks.push(`<div class="page"><p class="paragraph">Cuento sin contenido.</p></div>`);
+    }
+    if (imagesHtmlParts.length) {
+      const lastIdx = pageBlocks.length - 1;
+      pageBlocks[lastIdx] = pageBlocks[lastIdx].replace(
+        '</div>',
+        `${imagesHtmlParts.join('\n')}</div>`,
+      );
+    }
+
     const metaLine = meta
       ? `<p class="meta">Meta: edad ${escapeHtml(String(meta.age_range ?? ''))} anos - habilidad ${escapeHtml(String(meta.skill ?? ''))} - tono ${escapeHtml(String(meta.tone ?? ''))}</p>`
       : '';
+
+    const storyPagesHtml = pageBlocks.join('\n');
 
     return `<!DOCTYPE html>
 <html lang="es">
@@ -548,19 +668,24 @@ export default function MakerScreen() {
   <meta charset="utf-8" />
   <title>${escapedDisplayTitle}</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f7; color: #1b1b1f; padding: 24px; }
+    @page { size: A4; margin: 24mm 20mm; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f7; color: #1b1b1f; padding: 0; margin: 0; }
+    main { padding: 24px 28px; }
     h1 { font-size: 22px; margin-bottom: 12px; }
     .meta { color: #54545a; margin-bottom: 16px; font-size: 13px; }
     .paragraph { margin-bottom: 14px; line-height: 1.55; }
+    .page { page-break-after: always; padding-bottom: 12px; }
+    .page:last-child { page-break-after: auto; }
     .image-block { margin: 18px 0; text-align: center; }
     .image-block img { max-width: 100%; border-radius: 14px; border: 1px solid #d0d0d6; }
   </style>
 </head>
 <body>
-  <h1>${escapedDisplayTitle}</h1>
-  ${metaLine}
-  ${storyBlocks || '<p class="paragraph">Cuento sin contenido.</p>'}
-  ${imagesHtmlParts.join('\n')}
+  <main>
+    <h1>${escapedDisplayTitle}</h1>
+    ${metaLine}
+    ${storyPagesHtml}
+  </main>
 </body>
 </html>`;
   }, [paragraphs, planWithResults, theme, meta, storyText]);
@@ -568,7 +693,26 @@ export default function MakerScreen() {
   const exportStoryPdf = React.useCallback(async () => {
     if (!storyText?.trim()) throw new Error('No hay cuento para exportar.');
     const html = await createStoryHtml();
-    const { uri: tempUri } = await Print.printToFileAsync({ html });
+
+    if (typeof Print.printToFileAsync !== 'function') {
+      throw new Error('Generar PDF no esta disponible en esta plataforma.');
+    }
+
+    let tempUri: string | undefined;
+    try {
+      const result = await Print.printToFileAsync({ html });
+      tempUri = result?.uri;
+    } catch (printErr) {
+      if (Platform.OS === 'web') {
+        throw new Error('Guardar cuentos en PDF no esta disponible en la version web todavia. Usa la app nativa para exportar.');
+      }
+      throw printErr;
+    }
+
+    if (!tempUri) {
+      throw new Error('No se pudo generar el archivo PDF.');
+    }
+
     const baseDir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory;
     if (!baseDir) return tempUri;
     const baseTitle = theme?.trim() || DEFAULT_STORY_TITLE;
@@ -657,10 +801,10 @@ export default function MakerScreen() {
         metadataUri,
         metaSummary: meta
           ? {
-              age_range: meta?.age_range,
-              skill: meta?.skill,
-              tone: meta?.tone,
-            }
+            age_range: meta?.age_range,
+            skill: meta?.skill,
+            tone: meta?.tone,
+          }
           : undefined,
       };
 
@@ -717,7 +861,7 @@ export default function MakerScreen() {
             const reverted = entryId ? arrRef.filter(item => item.id !== entryId) : arrRef;
             await AsyncStorage.setItem(key, JSON.stringify(reverted));
           }
-        } catch {}
+        } catch { }
         Alert.alert('Sin espacio', 'Tu biblioteca esta llena. Borra cuentos guardados o libera espacio en el dispositivo.');
       } else {
         Alert.alert('Ups', message);
@@ -781,7 +925,7 @@ export default function MakerScreen() {
 
 Resumen del cuento:
 ${storyText.slice(0, 900)}`,
-            num_images: 1,
+            count: 1,
           });
 
           let finalUri: string | null = uri ?? null;
@@ -830,7 +974,7 @@ ${storyText.slice(0, 900)}`,
             <TextInput placeholder="Luna (prota), Tito (amigo)" placeholderTextColor="#8fa0c2" value={characters} onChangeText={setCharacters} style={{ color: THEME.text, borderColor: THEME.border, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12 }} />
 
             <View style={{ flexDirection: 'row', marginBottom: 12 }}>
-              {(['tierno','aventurero','humor'] as const).map((t) => (<Chip key={t} label={t} selected={tone === t} onPress={() => setTone(t)} />))}
+              {(['tierno', 'aventurero', 'humor'] as const).map((t) => (<Chip key={t} label={t} selected={tone === t} onPress={() => setTone(t)} />))}
             </View>
 
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>

@@ -45,7 +45,10 @@ export default function ModalScreen() {
           <Card title="Recuperar contraseña">
             <Field label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
             <PrimaryButton label={loading ? 'Enviando…' : 'Enviar enlace'} onPress={submitForgot} disabled={!canSubmit || loading} />
-            <View style={{ height: 8 }} />
+            <View style={{ height: 16 }} />
+            <Text style={{ color: THEME.accent, textAlign: 'center', marginBottom: 10 }} onPress={() => router.push({ pathname: '/reset-password', params: { email } })}>
+              Ya tengo un código
+            </Text>
             <Text style={{ color: THEME.textDim, textAlign: 'center' }} onPress={() => router.back()}>
               Cerrar
             </Text>

@@ -41,8 +41,9 @@ function Button({
 }
 
 export default function AuthCard() {
-  const { user, loading, signInWithEmail, signOut } = useAuth();
+  const { user, loading, forgotPassword, logout } = useAuth();
   const [email, setEmail] = React.useState('');
+  const [sending, setSending] = React.useState(false);
 
   // Ejemplo simple de “etiquetas” si tu theme trae Chip:
   const [role, setRole] = React.useState<'invitado' | 'creador'>('invitado');
@@ -80,7 +81,7 @@ export default function AuthCard() {
           </View>
         ) : null}
 
-        <Button label="Cerrar sesión" onPress={signOut} />
+        <Button label="Cerrar sesión" onPress={logout} />
       </View>
     );
   }
@@ -132,7 +133,7 @@ export default function AuthCard() {
         </View>
       ) : null}
 
-      {loading ? (
+      {loading || sending ? (
         <View style={{ marginTop: 12 }}>
           <ActivityIndicator color={THEME.primary ?? '#84E1FF'} />
         </View>
@@ -140,8 +141,12 @@ export default function AuthCard() {
         <Button
           label="Enviar enlace"
           onPress={async () => {
-            const err = await signInWithEmail(email.trim());
-            if (err) console.warn('Auth error:', err);
+            setSending(true);
+            const response = await forgotPassword(email.trim());
+            if (!response.ok && response.error) {
+              console.warn('Auth error:', response.error);
+            }
+            setSending(false);
           }}
           disabled={!email.trim()}
         />
