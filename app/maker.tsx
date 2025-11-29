@@ -16,6 +16,8 @@ import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useAuth } from '../src/auth/AuthProvider';
 import AppNavbar, { type NavbarMenuItem } from '../src/components/AppNavbar';
 import StoryReader from '../src/components/StoryReader';
+import MusicBar from '../src/components/MusicBar';
+import { useMusicPlayer } from '../src/lib/musicPlayer';
 
 /* ---------------- THEME ---------------- */
 const THEME = {
@@ -168,7 +170,10 @@ async function callIllustrations(payload: {
   beats?: Array<{ slot: IllustrationSlot; label: string; excerpt: string; order: number }>;
   count?: number;
 }): Promise<string[]> {
-  const { images } = await fetchJSON<{ images?: string[] }>('/api/illustrate', payload, { allowProxy: true });
+  const { images } = await fetchJSON<{ images?: string[] }>('/api/illustrate-gemini', {
+    ...payload,
+    num_images: payload.count ?? 3,
+  }, { allowProxy: true });
   return Array.isArray(images) ? images : [];
 }
 
@@ -529,6 +534,7 @@ export default function MakerScreen() {
   const [illustrations, setIllustrations] = React.useState<IllustrationResult[]>([]);
   const speakingRef = React.useRef(false);
   const [loggingOut, setLoggingOut] = React.useState(false);
+  const music = useMusicPlayer();
 
   React.useEffect(() => {
     if (!authLoading && !user) {
@@ -1064,7 +1070,13 @@ ${storyText.slice(0, 900)}`,
             <>
               <View style={{ height: 16 }} />
               <Text style={{ color: THEME.textDim, marginBottom: 6, fontWeight: '700' }}>Tu cuento</Text>
-              <StoryReader text={storyText} locale={ageRange === '6-10' ? 'es-AR' : 'es-AR'} />
+              <MusicBar player={music} theme={THEME} />
+              <View style={{ height: 12 }} />
+              <StoryReader
+                text={storyText}
+                locale={ageRange === '6-10' ? 'es-AR' : 'es-AR'}
+                onNarrationStart={() => { if (!music.isPlaying) music.play(); }}
+              />
             </>
           ) : null}
 

@@ -17,12 +17,14 @@ const THEME = {
 type Props = {
   text: string;
   locale?: string; // ej. 'es-AR'
+  onNarrationStart?: () => void;
+  onNarrationStop?: () => void;
 };
 
 /** Voz preferida; si no existe en el dispositivo, elegimos la 1a en espanol. */
 const PREFERRED_VOICE = 'es-us-x-esd-local'; // "Pablo"
 
-export default function StoryReader({ text, locale = 'es-AR' }: Props) {
+export default function StoryReader({ text, locale = 'es-AR', onNarrationStart, onNarrationStop }: Props) {
   const segments = React.useMemo(() => splitIntoSegments(text), [text]);
   const [idx, setIdx] = React.useState(0);
   const [rate, setRate] = React.useState(0.98);
@@ -72,21 +74,24 @@ export default function StoryReader({ text, locale = 'es-AR' }: Props) {
 
   const onPlay = React.useCallback(() => {
     Speech.stop();
+    onNarrationStart?.();
     speakFrom(idx);
-  }, [idx, speakFrom]);
+  }, [idx, speakFrom, onNarrationStart]);
 
   const onPause = React.useCallback(() => {
     canceled.current = true;
     Speech.stop(); // "pausa" efectiva
     setSpeaking(false);
-  }, []);
+    onNarrationStop?.();
+  }, [onNarrationStop]);
 
   const onStop = React.useCallback(() => {
     canceled.current = true;
     Speech.stop();
     setSpeaking(false);
     setIdx(0);
-  }, []);
+    onNarrationStop?.();
+  }, [onNarrationStop]);
 
   const goTo = React.useCallback((i: number) => {
     canceled.current = true;

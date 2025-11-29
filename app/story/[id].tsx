@@ -5,6 +5,8 @@ import * as React from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import StoryReader from '../../src/components/StoryReader';
 import { getStory } from '../../src/lib/storage';
+import MusicBar from '../../src/components/MusicBar';
+import { useMusicPlayer } from '../../src/lib/musicPlayer';
 
 const Btn = (p: { label: string; onPress: () => void; disabled?: boolean }) => (
   <Text
@@ -30,6 +32,7 @@ export default function StoryReaderScreen() {
   const [text, setText] = React.useState<string>('');
   const [speaking, setSpeaking] = React.useState(false);
   const [rate, setRate] = React.useState(0.98);
+  const music = useMusicPlayer();
 
   React.useEffect(() => {
     let alive = true;
@@ -46,6 +49,7 @@ export default function StoryReaderScreen() {
 
   const speak = React.useCallback(() => {
     if (!text) return;
+    if (!music.isPlaying) music.play();
     setSpeaking(true);
     Speech.speak(text, {
       language: 'es-AR',
@@ -72,7 +76,13 @@ export default function StoryReaderScreen() {
         </Text>
         
         <Text style={{ color: '#a9b4d0', lineHeight: 22 }}>{text || 'No se encontró el cuento.'}</Text>
-        <StoryReader text={text} locale="es-AR" />
+        <MusicBar player={music} theme={{ text: '#e6eef9', textDim: '#a9b4d0', accent: '#84E1FF', card: '#131c34', border: '#1f2a46' }} />
+        <View style={{ height: 10 }} />
+        <StoryReader
+          text={text}
+          locale="es-AR"
+          onNarrationStart={() => { if (!music.isPlaying) music.play(); }}
+        />
         <Btn label="Leer" onPress={speak} disabled={speaking || !text} />
         <Btn label="Detener" onPress={stop} disabled={!speaking} />
         <Text
