@@ -45,8 +45,8 @@
       "reactCompiler": true
     },
     "extra": {
-      "API_BASE_URL_PROD": "https://poplicuentos-api.vercel.app",
-      "API_BASE_URL": "http://localhost:3000",
+      "API_BASE_URL": "https://poplicuentos-api.vercel.app",
+      "API_BASE_URL_DEV": "http://localhost:3000",
       "LOGIN_PATH": "/api/login",
       "REGISTER_PATH": "/api/register",
       "FORGOT_PATH": "/api/auth/request-reset",
