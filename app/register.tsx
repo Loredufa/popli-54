@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import React from 'react';
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import Card from '../src/components/Card';
+import BrandLogo from '../src/components/BrandLogo';
 import PrimaryButton from '../src/components/PrimaryButton';
 import { THEME } from '../src/theme';
 // luego esto apuntarÃ¡ a API a travÃ©s de tu AuthProvider actualizado
@@ -44,6 +45,7 @@ export default function RegisterScreen() {
     <KeyboardAvoidingView behavior={Platform.select({ ios: 'padding', android: undefined })} style={{ flex: 1, backgroundColor: THEME.bgTop }}>
       <ScrollView contentContainerStyle={{ padding: 16 }}>
         <Card title="Crear cuenta">
+          <BrandLogo size={120} style={{ marginBottom: 16 }} />
           <Field label="Nombre" value={firstName} onChangeText={setFirstName} />
           <Field label="Apellido" value={lastName} onChangeText={setLastName} />
           <Field label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />

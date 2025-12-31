@@ -1,8 +1,11 @@
 // src/components/StoryReader.tsx
 import { Feather } from '@expo/vector-icons';
-import * as Speech from 'expo-speech';
 import * as React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import {
+  Pressable, ScrollView, Text, View, Alert, Platform, ActivityIndicator,
+} from 'react-native';
+import { Audio } from 'expo-av';
+import { fetchNarrationTemp } from '../lib/ttsClient';
 
 /** Mini tema para mantener el look&feel */
 const THEME = {
@@ -17,86 +20,148 @@ const THEME = {
 type Props = {
   text: string;
   locale?: string; // ej. 'es-AR'
+  voiceLabel?: string;
+  voiceId?: string; // alloy | nova | shimmer
+  onChooseNarrator?: () => void;
   onNarrationStart?: () => void;
   onNarrationStop?: () => void;
+  audioUri?: string | null;
+  onNarrationReady?: (voiceId: string, uri: string) => void;
 };
 
-/** Voz preferida; si no existe en el dispositivo, elegimos la 1a en espanol. */
-const PREFERRED_VOICE = 'es-us-x-esd-local'; // "Pablo"
-
-export default function StoryReader({ text, locale = 'es-AR', onNarrationStart, onNarrationStop }: Props) {
+export default function StoryReader({
+  text,
+  locale = 'es-AR',
+  voiceLabel,
+  voiceId,
+  onChooseNarrator,
+  onNarrationStart,
+  onNarrationStop,
+  audioUri,
+  onNarrationReady,
+}: Props) {
   const segments = React.useMemo(() => splitIntoSegments(text), [text]);
   const [idx, setIdx] = React.useState(0);
   const [rate, setRate] = React.useState(0.98);
   const [speaking, setSpeaking] = React.useState(false);
+  const [loadingAudio, setLoadingAudio] = React.useState(false);
+  const [hasSound, setHasSound] = React.useState(false);
+  const soundRef = React.useRef<Audio.Sound | null>(null);
+  const [statusText, setStatusText] = React.useState<string | null>(null);
+  const currentUriRef = React.useRef<string | null>(null);
 
-  const chosenVoice = React.useRef<string | undefined>(undefined);
-  const canceled = React.useRef(false);
-
-  // Resolver voz disponible en el dispositivo
   React.useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const voices = await Speech.getAvailableVoicesAsync?.();
-        const pick =
-          voices?.find(v => v.identifier === PREFERRED_VOICE) ||
-          voices?.find(v => v.language?.startsWith('es'));
-        if (alive) chosenVoice.current = pick?.identifier || PREFERRED_VOICE;
-      } catch {
-        chosenVoice.current = PREFERRED_VOICE;
-      }
-    })();
     return () => {
-      alive = false;
-      Speech.stop();
-      setSpeaking(false);
+      soundRef.current?.unloadAsync().catch(() => {});
+      currentUriRef.current = null;
+      setHasSound(false);
     };
   }, []);
 
-  // Si cambia el cuento, reiniciar cursor
-  React.useEffect(() => setIdx(0), [text]);
-
-  const speakFrom = React.useCallback(
-    async (start: number) => {
-      canceled.current = false;
-      setSpeaking(true);
-      for (let i = start; i < segments.length; i++) {
-        setIdx(i);
-        await speakOnce(segments[i], locale, rate, chosenVoice.current);
-        if (canceled.current) break;
-        await wait(120);
-      }
-      setSpeaking(false);
-    },
-    [segments, locale, rate]
-  );
-
-  const onPlay = React.useCallback(() => {
-    Speech.stop();
-    onNarrationStart?.();
-    speakFrom(idx);
-  }, [idx, speakFrom, onNarrationStart]);
-
-  const onPause = React.useCallback(() => {
-    canceled.current = true;
-    Speech.stop(); // "pausa" efectiva
+  // Si cambia el cuento, reiniciar cursor/parar sonido
+  React.useEffect(() => {
+    setIdx(0);
+    soundRef.current?.stopAsync().catch(() => {});
     setSpeaking(false);
-    onNarrationStop?.();
+  }, [text]);
+
+  const playFromStart = React.useCallback(async () => {
+    if (!text?.trim()) return;
+    try {
+      setLoadingAudio(true);
+      setStatusText('Generando la voz de tu cuento...');
+      let uri = audioUri;
+      if (uri?.startsWith('blob:')) {
+        console.log('[StoryReader] cached blob uri invalidated, will re-fetch');
+        uri = null;
+      }
+      if (!uri) {
+        console.log('[StoryReader] play -> fetchNarrationTemp');
+        const vid = voiceId || 'shimmer';
+        uri = await fetchNarrationTemp({ storyText: text, voiceId: vid, locale });
+        onNarrationReady?.(vid, uri);
+      }
+
+      // Si ya tenemos audio cargado y coincide, reanuda
+      const existingSound = soundRef.current;
+      if (existingSound && currentUriRef.current === uri) {
+        const status = await existingSound.getStatusAsync().catch(() => null as any);
+        if (status?.isLoaded && !status.isPlaying) {
+          await existingSound.playAsync();
+          setSpeaking(true);
+          setStatusText('Reproduciendo...');
+          onNarrationStart?.();
+          setHasSound(true);
+          return;
+        }
+      }
+
+      setStatusText('Reproduciendo...');
+      if (soundRef.current) {
+        await soundRef.current.stopAsync().catch(() => {});
+        await soundRef.current.unloadAsync().catch(() => {});
+        soundRef.current = null;
+      }
+      const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true, volume: 1 });
+      soundRef.current = sound;
+      currentUriRef.current = uri;
+      setSpeaking(true);
+      setHasSound(true);
+      onNarrationStart?.();
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (!status.isLoaded) return;
+        if (!status.isPlaying) setSpeaking(false);
+        if (status.didJustFinish) {
+          setSpeaking(false);
+          onNarrationStop?.();
+          sound.unloadAsync().catch(() => {});
+          soundRef.current = null;
+          currentUriRef.current = null;
+          setHasSound(false);
+          setStatusText(null);
+        }
+      });
+    } catch (e: any) {
+      console.warn('Narracion error', e);
+      const isAbort = e?.name === 'AbortError';
+      const msg = isAbort
+        ? 'La generación de voz tardó demasiado. Intenta nuevamente.'
+        : (e?.message || 'No se pudo narrar el cuento.');
+      Alert.alert('Narracion', msg);
+      setSpeaking(false);
+      onNarrationStop?.();
+      setStatusText(null);
+    } finally {
+      setLoadingAudio(false);
+    }
+  }, [text, voiceId, locale, onNarrationStart, onNarrationStop]);
+
+  const onPause = React.useCallback(async () => {
+    if (!soundRef.current) return;
+    try {
+      const status = await soundRef.current.getStatusAsync();
+      if (status.isLoaded && status.isPlaying) {
+        await soundRef.current.pauseAsync();
+        setSpeaking(false);
+        setStatusText('Pausado');
+        onNarrationStop?.();
+      }
+    } catch {
+      // ignore pause errors
+    }
   }, [onNarrationStop]);
 
   const onStop = React.useCallback(() => {
-    canceled.current = true;
-    Speech.stop();
+    soundRef.current?.stopAsync().catch(() => {});
     setSpeaking(false);
     setIdx(0);
     onNarrationStop?.();
+    setStatusText(null);
+    setHasSound(false);
   }, [onNarrationStop]);
 
   const goTo = React.useCallback((i: number) => {
-    canceled.current = true;
-    Speech.stop();
-    setSpeaking(false);
+    // No segment skip en audio TTS remoto; solo actualizamos indice visual
     setIdx(i);
   }, []);
 
@@ -110,27 +175,43 @@ export default function StoryReader({ text, locale = 'es-AR', onNarrationStart, 
         padding: 14,
       }}
     >
-      <Text style={{ color: THEME.text, fontSize: 16, fontWeight: '600', marginBottom: 4 }}>
-        Narrador: Pablo
-      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+        <Text
+          style={{ color: THEME.text, fontSize: 16, fontWeight: '600', flex: 1 }}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+        >
+          Narrador: {voiceLabel || 'Pablo'}
+        </Text>
+        {onChooseNarrator ? (
+          <Pressable onPress={onChooseNarrator}>
+            <Text style={{ color: THEME.accent, fontWeight: '700' }}>Elegir narrador</Text>
+          </Pressable>
+        ) : null}
+      </View>
       <Text style={{ color: THEME.textDim, marginBottom: 12, fontSize: 12 }}>
         Voz es-AR
       </Text>
 
       {/* Controles */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <IconButton icon="play" onPress={onPlay} disabled={!segments.length} />
-        <IconButton icon="pause" onPress={onPause} disabled={!speaking} />
+        <IconButton icon="play" onPress={playFromStart} disabled={!segments.length || loadingAudio} />
+        <IconButton icon="pause" onPress={onPause} disabled={!hasSound || loadingAudio} />
         <IconButton icon="square" onPress={onStop} />
+        {loadingAudio ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <ActivityIndicator color={THEME.accent} size="small" />
+            <Text style={{ color: THEME.textDim, fontSize: 12 }}>
+              {statusText || 'Generando voz...'}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
-      {/* Velocidad */}
+      {/* Nota: la velocidad ya no aplica al audio TTS descargado */}
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-        <Text style={{ color: THEME.textDim, marginRight: 8 }}>Velocidad</Text>
-        <RoundIcon icon="minus" onPress={() => setRate(r => Math.max(0.8, +(r - 0.05).toFixed(2)))} />
-        <Text style={{ color: THEME.text, marginHorizontal: 6 }}>{rate.toFixed(2)}x</Text>
-        <RoundIcon icon="plus" onPress={() => setRate(r => Math.min(1.2, +(r + 0.05).toFixed(2)))} />
-        <View style={{ flex: 1 }} />
+        <Text style={{ color: THEME.textDim, marginRight: 8 }}>Velocidad (solo lector del dispositivo)</Text>
+        <Text style={{ color: THEME.text, marginLeft: 4 }}>{rate.toFixed(2)}x</Text>
       </View>
 
       {/* Ir a... */}

@@ -4,6 +4,7 @@ import React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { THEME } from '../theme';
+import BrandLogo from './BrandLogo';
 
 export type NavbarMenuItem = {
   label: string;
@@ -14,6 +15,7 @@ export type NavbarMenuItem = {
 };
 
 export type AppNavbarProps = {
+  title?: string;
   name?: string;
   greetingPrefix?: string;
   menuItems: NavbarMenuItem[];
@@ -25,6 +27,7 @@ const NAV_BG = 'rgba(11, 18, 38, 0.75)';
 const MENU_BG = 'rgba(14, 22, 48, 0.94)';
 
 export default function AppNavbar({
+  title = 'PopliCuentos',
   name,
   greetingPrefix = 'Hola',
   menuItems,
@@ -74,12 +77,9 @@ export default function AppNavbar({
         }}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0 }}>
-          <Feather name='star' size={22} color={THEME.accent} />
-          <Text
-            style={{ color: THEME.text, fontSize: 22, fontWeight: '800', marginLeft: 8 }}
-            numberOfLines={1}
-          >
-           
+          <BrandLogo size={36} style={{ marginRight: 8 }} />
+          <Text style={{ color: THEME.text, fontSize: 20, fontWeight: '800' }} numberOfLines={1}>
+            {title}
           </Text>
         </View>
 

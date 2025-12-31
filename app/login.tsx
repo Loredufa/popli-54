@@ -4,6 +4,7 @@ import React from 'react';
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useAuth } from '../src/auth/AuthProvider';
 import Card from '../src/components/Card';
+import BrandLogo from '../src/components/BrandLogo';
 import PrimaryButton from '../src/components/PrimaryButton';
 import { THEME } from '../src/theme';
 
@@ -30,6 +31,7 @@ export default function LoginScreen() {
     <KeyboardAvoidingView behavior={Platform.select({ ios: 'padding', android: undefined })} style={{ flex: 1, backgroundColor: THEME.bgTop }}>
       <ScrollView contentContainerStyle={{ padding: 16 }}>
         <Card title="Iniciar sesión">
+          <BrandLogo size={120} style={{ marginBottom: 16 }} />
           <Field label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
           <Field label="Contraseña" value={password} onChangeText={setPassword} secureTextEntry />
           <Text style={{ color: THEME.accent, textAlign: 'right', marginBottom: 10 }}

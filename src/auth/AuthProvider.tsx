@@ -97,7 +97,9 @@ async function requestJSON<T = any>(
 
   if (!res.ok) {
     const msg = (data?.error || data?.message || `HTTP ${res.status}`);
-    throw new Error(msg);
+    const err: any = new Error(msg);
+    err.status = res.status;
+    throw err;
   }
   return data as T;
 }
@@ -242,9 +244,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const me = await get<User>(ME_PATH, tk);
       setUser(me);
       await AsyncStorage.setItem(STORAGE_USER, JSON.stringify(me));
-    } catch {
-      // Si falla (token inválido), limpiamos
-      await clearSession();
+    } catch (err: any) {
+      // Solo limpiamos la sesión si el backend confirma que es inválida;
+      // en errores transitorios mantenemos al usuario conectado.
+      if (err?.status === 401 || err?.status === 403) {
+        await clearSession();
+      }
     }
   }
 
@@ -303,4 +308,3 @@ export function AuthGate({
   if (!user) return <>{fallback ?? null}</>;
   return <>{children}</>;
 }
-

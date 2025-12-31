@@ -5,7 +5,9 @@ import React from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { useApi } from '../src/api/useApi';
+import { saveLastResetEmail } from '../src/auth/resetStorage';
 import Card from '../src/components/Card';
+import BrandLogo from '../src/components/BrandLogo';
 import PrimaryButton from '../src/components/PrimaryButton';
 import { THEME } from '../src/theme';
 
@@ -26,11 +28,13 @@ export default function ModalScreen() {
   const submitForgot = async () => {
     if (!canSubmit) return;
     setLoading(true);
+    const normalizedEmail = email.trim().toLowerCase();
     try {
       // Tu API debe enviar el mail de recuperación (Supabase o lo que uses)
-      await api.post(FORGOT_PATH, { email: email.trim().toLowerCase() });
+      await api.post(FORGOT_PATH, { email: normalizedEmail });
+      await saveLastResetEmail(normalizedEmail);
       Alert.alert('Listo', 'Te enviamos un enlace para restablecer tu contraseña.');
-      router.back();
+      router.push({ pathname: '/reset-password', params: { email: normalizedEmail } });
     } catch (e: any) {
       Alert.alert('No se pudo enviar el enlace', e.message || 'Error');
     } finally {
@@ -43,10 +47,17 @@ export default function ModalScreen() {
       <ScrollView contentContainerStyle={{ padding: 16 }}>
         {isForgot ? (
           <Card title="Recuperar contraseña">
+            <BrandLogo size={110} style={{ marginBottom: 16 }} />
             <Field label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
             <PrimaryButton label={loading ? 'Enviando…' : 'Enviar enlace'} onPress={submitForgot} disabled={!canSubmit || loading} />
             <View style={{ height: 16 }} />
-            <Text style={{ color: THEME.accent, textAlign: 'center', marginBottom: 10 }} onPress={() => router.push({ pathname: '/reset-password', params: { email } })}>
+            <Text
+              style={{ color: THEME.accent, textAlign: 'center', marginBottom: 10 }}
+              onPress={async () => {
+                await saveLastResetEmail(email);
+                router.push({ pathname: '/reset-password', params: { email } });
+              }}
+            >
               Ya tengo un código
             </Text>
             <Text style={{ color: THEME.textDim, textAlign: 'center' }} onPress={() => router.back()}>
@@ -55,6 +66,7 @@ export default function ModalScreen() {
           </Card>
         ) : (
           <Card title="Ayuda">
+            <BrandLogo size={110} style={{ marginBottom: 16 }} />
             <Text style={{ color: THEME.text }}>
               Si algo falla, revisá la URL de la API en <Text style={{ fontWeight: '700' }}>app.json</Text>.
             </Text>

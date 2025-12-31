@@ -66,6 +66,7 @@ export function useMusicPlayer() {
     if (isChanging.current) return;
     await ensureAudioMode();
     const track = trackId ? TRACKS.find((t) => t.id === trackId) ?? currentTrack : currentTrack;
+    console.log('[Music] play request', track.id);
     if (!sound) {
       await loadAndPlay(track, true);
       return;
@@ -87,6 +88,7 @@ export function useMusicPlayer() {
   const pause = React.useCallback(async () => {
     if (!sound) return;
     try {
+      console.log('[Music] pause request');
       const status = await sound.getStatusAsync();
       if (status.isLoaded && status.isPlaying) {
         await sound.pauseAsync();

@@ -4,6 +4,7 @@ import React from 'react';
 import { Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../src/auth/AuthProvider';
 import Card from '../src/components/Card';
+import BrandLogo from '../src/components/BrandLogo';
 import { THEME } from '../src/theme';
 
 export default function MenuScreen() {
@@ -26,6 +27,7 @@ export default function MenuScreen() {
     return (
         <ScrollView style={{ flex: 1, backgroundColor: THEME.bgTop }} contentContainerStyle={{ padding: 16 }}>
             <Card title="Menú">
+                <BrandLogo size={110} style={{ marginBottom: 16 }} />
                 <View style={{ marginBottom: 20 }}>
                     <Text style={{ color: THEME.text, fontSize: 18, fontWeight: 'bold' }}>
                         {user?.first_name} {user?.last_name}

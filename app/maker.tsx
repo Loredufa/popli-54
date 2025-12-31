@@ -6,6 +6,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { router, type Href } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as React from 'react';
 import {
@@ -18,6 +19,9 @@ import AppNavbar, { type NavbarMenuItem } from '../src/components/AppNavbar';
 import StoryReader from '../src/components/StoryReader';
 import MusicBar from '../src/components/MusicBar';
 import { useMusicPlayer } from '../src/lib/musicPlayer';
+import { downloadNarrationToGallery, fetchVoices, fetchVoicePreview, type VoiceOption } from '../src/lib/ttsClient';
+import { saveCurrentSession, loadCurrentSession, StorySession, clearCurrentSession } from '../src/lib/storage';
+import { loadVoicePreference, saveVoicePreference } from '../src/lib/voicePrefs';
 
 /* ---------------- THEME ---------------- */
 const THEME = {
@@ -52,6 +56,12 @@ const AGE_OPTIONS = [
 const PHILO_SEEDS = [
   'amistad y justicia', 'verdad vs opinion', 'responsabilidad y consecuencias', 'identidad y cambio', 'perspectivas multiples', 'reglas y acuerdos', 'bien comun',
 ];
+
+const VOICE_LABELS: Record<string, string> = {
+  shimmer: 'Voz tierna (Shimmer)',
+  nova: 'Voz aventura (Nova)',
+  alloy: 'Voz calida (Alloy)',
+};
 
 function themeWithPhilosophy(theme: string, age: '2-5' | '6-10') {
   if (age !== '6-10') return theme;
@@ -190,6 +200,10 @@ function escapeHtml(value: string) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function toImprenta(text: string) {
+  return (text || '').toLocaleUpperCase('es-ES');
 }
 
 function slugify(value: string) {
@@ -535,12 +549,104 @@ export default function MakerScreen() {
   const speakingRef = React.useRef(false);
   const [loggingOut, setLoggingOut] = React.useState(false);
   const music = useMusicPlayer();
+  const [voiceId, setVoiceId] = React.useState<string>('shimmer');
+  const [audioMap, setAudioMap] = React.useState<Record<string, string>>({});
+  const [audioLoading, setAudioLoading] = React.useState(false);
+  const [voices, setVoices] = React.useState<VoiceOption[]>([]);
+  const [loadingVoices, setLoadingVoices] = React.useState(false);
+  const [exportingPdf, setExportingPdf] = React.useState(false);
+  const [previewing, setPreviewing] = React.useState<string | null>(null);
+  const [showVoiceList, setShowVoiceList] = React.useState(true);
+  const previewSoundRef = React.useRef<any>(null);
+  const previewObjectUrlRef = React.useRef<string | null>(null);
+
+  const sanitizeAudioMap = React.useCallback((map: Record<string, string> = {}) => {
+    const cleaned: Record<string, string> = {};
+    Object.entries(map).forEach(([k, v]) => {
+      if (typeof v === 'string' && !v.startsWith('blob:') && v.trim()) {
+        cleaned[k] = v;
+      }
+    });
+    return cleaned;
+  }, []);
+  React.useEffect(() => {
+    return () => {
+      if (previewSoundRef.current) {
+        previewSoundRef.current.unloadAsync?.().catch(() => {});
+      }
+      if (previewObjectUrlRef.current && Platform.OS === 'web') {
+        URL.revokeObjectURL(previewObjectUrlRef.current);
+      }
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!authLoading && !user) {
       router.replace(LOGIN_ROUTE);
     }
   }, [authLoading, user]);
+
+  React.useEffect(() => {
+    let alive = true;
+    (async () => {
+      const pref = await loadVoicePreference();
+      if (alive && pref) setVoiceId(pref);
+      setLoadingVoices(true);
+      try {
+        const list = await fetchVoices();
+        if (alive) {
+          const finalList = list.length >= 3 ? list : [
+            { id: 'shimmer', label: 'Voz tierna (Shimmer)', description: 'Dulce y amable', idealFor: '', timbre: '' },
+            { id: 'nova', label: 'Voz aventura (Nova)', description: 'Expresiva y dinamica', idealFor: '', timbre: '' },
+            { id: 'alloy', label: 'Voz calida (Alloy)', description: 'Narrador neutro y cercano', idealFor: '', timbre: '' },
+          ];
+          setVoices(finalList);
+          if (!pref && finalList[0]) setVoiceId(finalList[0].id);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (alive) setLoadingVoices(false);
+      }
+      const session = await loadCurrentSession();
+      if (alive && session?.story) {
+        setStoryText(session.story);
+        if (session.meta) setMeta(session.meta);
+        if (session.voiceId) setVoiceId(session.voiceId);
+        if (session.audioMap) setAudioMap(sanitizeAudioMap(session.audioMap));
+        else if (session.audioUri && session.voiceId) {
+          const cleaned = sanitizeAudioMap({ [session.voiceId]: session.audioUri });
+          setAudioMap(cleaned);
+        }
+        const plan = buildIllustrationPlan(session.story);
+        setIllustrationPlan(plan);
+        const imgs = session.images || [];
+        const results = plan.map((item, idx) => ({
+          ...item,
+          uri: imgs[idx] ?? null,
+        }));
+        setIllustrations(results);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+      (async () => {
+        const pref = await loadVoicePreference();
+        if (active && pref) setVoiceId(pref);
+        try {
+          const list = await fetchVoices();
+          if (active) setVoices(list);
+        } catch {
+          // ignore
+        }
+      })();
+      return () => { active = false; };
+    }, [])
+  );
 
   const greetingName = React.useMemo(() => {
     if (!user) return '';
@@ -550,6 +656,13 @@ export default function MakerScreen() {
   }, [user]);
 
   const canGenerate = !!ageRange && !!theme && !!skill && !loading;
+  const voiceLabel = React.useMemo(() => VOICE_LABELS[voiceId] || voiceId, [voiceId]);
+  const voiceList = React.useMemo(() => voices.length ? voices : [
+    { id: 'shimmer', label: 'Voz tierna (Shimmer)', description: 'Dulce y amable', idealFor: '', timbre: '' },
+    { id: 'nova', label: 'Voz aventura (Nova)', description: 'Expresiva y dinamica', idealFor: '', timbre: '' },
+    { id: 'alloy', label: 'Voz calida (Alloy)', description: 'Narrador neutro y cercano', idealFor: '', timbre: '' },
+  ], [voices]);
+  const currentAudioUri = audioMap[voiceId] || null;
 
   const skillsContent = React.useMemo(() => (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
@@ -584,8 +697,27 @@ export default function MakerScreen() {
     return groups;
   }, [planWithResults]);
 
+  React.useEffect(() => {
+    if (!storyText?.trim()) return;
+    const session: StorySession = {
+      id: 'current',
+      story: storyText,
+      title: theme,
+      images: illustrations.map((item) => item.uri).filter(Boolean) as string[],
+      voiceId,
+      audioMap: Object.keys(audioMap).length ? audioMap : undefined,
+      meta,
+      createdAt: new Date().toISOString(),
+    };
+    saveCurrentSession(session).catch(() => {});
+  }, [storyText, illustrations, voiceId, audioMap, meta, theme]);
+
   const hasIllustrations = React.useMemo(
     () => planWithResults.some((item) => Boolean(item.uri)),
+    [planWithResults],
+  );
+  const imagesForPdf = React.useMemo(
+    () => planWithResults.map((item) => item.uri).filter(Boolean) as string[],
     [planWithResults],
   );
 
@@ -616,8 +748,17 @@ export default function MakerScreen() {
       <View key={key} style={{ marginVertical: 12 }}>
         <Image
           source={{ uri: item.uri }}
-          style={{ width: '100%', height: 220, borderRadius: 14, borderWidth: 1, borderColor: THEME.border, backgroundColor: 'rgba(255,255,255,0.05)' }}
-          resizeMode='cover'
+          style={{
+            width: '100%',
+            height: undefined,
+            aspectRatio: 3 / 4,
+            maxHeight: 420,
+            borderRadius: 14,
+            borderWidth: 1,
+            borderColor: THEME.border,
+            backgroundColor: 'rgba(255,255,255,0.05)',
+          }}
+          resizeMode='contain'
         />
       </View>
     );
@@ -626,17 +767,17 @@ export default function MakerScreen() {
   const createStoryHtml = React.useCallback(async () => {
     const baseTitle = theme?.trim() || DEFAULT_STORY_TITLE;
     const displayTitle = `${baseTitle} ${BRAND_SUFFIX}`;
-    const escapedDisplayTitle = escapeHtml(displayTitle);
-    const imagesHtmlParts: string[] = [];
+    const displayTitleUpper = toImprenta(displayTitle);
+    const escapedDisplayTitle = escapeHtml(displayTitleUpper);
+    const imagesForSections: Array<{ dataUri: string; label: string }> = [];
     for (const [idx, item] of planWithResults.entries()) {
       if (!item.uri) continue;
       try {
         const dataUri = await ensureDataUri(item.uri, item.slot, idx);
-        imagesHtmlParts.push(`
-          <div class="image-block">
-            <img src="${dataUri}" alt="${escapeHtml(item.label)}-${idx + 1}" />
-          </div>
-        `);
+        imagesForSections.push({
+          dataUri,
+          label: `${escapeHtml(item.label)}-${idx + 1}`,
+        });
       } catch (imageErr) {
         console.warn('No se pudo incluir ilustracion en PDF', item.uri, imageErr);
       }
@@ -644,26 +785,66 @@ export default function MakerScreen() {
 
     const paragraphSource = paragraphs.length ? paragraphs : (storyText ? [storyText.trim()] : []);
     const paragraphBlocks = paragraphSource
-      .map((block) => `<p class="paragraph">${escapeHtml(block)}</p>`);
+      .map((block) => `<p class="paragraph">${escapeHtml(toImprenta(block))}</p>`);
 
-    const chunkSize = 4;
-    const pageBlocks: string[] = [];
-    for (let i = 0; i < paragraphBlocks.length; i += chunkSize) {
-      pageBlocks.push(`<div class="page">${paragraphBlocks.slice(i, i + chunkSize).join('\n')}</div>`);
+    if (!paragraphBlocks.length) {
+      const fallbackPage = `<div class="page"><p class="paragraph">CUENTO SIN CONTENIDO.</p></div>`;
+      return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapedDisplayTitle}</title>
+  <style>
+    @page { size: A4; margin: 18mm 16mm; }
+    body { font-family: "Arial Rounded MT Bold", "Trebuchet MS", "Comic Sans MS", sans-serif; background: #fef9f3; color: #1b1b1f; padding: 0; margin: 0; }
+    main { padding: 18px 20px; }
+    h1 { font-size: 28px; margin-bottom: 12px; letter-spacing: 1px; text-transform: uppercase; }
+    .meta { color: #3f3f46; margin-bottom: 16px; font-size: 13px; letter-spacing: 0.6px; text-transform: uppercase; }
+    .paragraph { margin-bottom: 12px; line-height: 1.8; font-size: 18px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+    .page { page-break-after: auto; padding-bottom: 18px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>${escapedDisplayTitle}</h1>
+    ${meta ? `<p class="meta">${escapeHtml(toImprenta(`Meta: edad ${String(meta.age_range ?? '')} anos - habilidad ${String(meta.skill ?? '')} - tono ${String(meta.tone ?? '')}`))}</p>` : ''}
+    ${fallbackPage}
+  </main>
+</body>
+</html>`;
     }
-    if (!pageBlocks.length) {
-      pageBlocks.push(`<div class="page"><p class="paragraph">Cuento sin contenido.</p></div>`);
+
+    const totalSections = 3;
+    const totalParagraphs = paragraphBlocks.length;
+    const baseCount = Math.floor(totalParagraphs / totalSections);
+    const remainder = totalParagraphs % totalSections;
+    const sections: string[] = [];
+    let cursor = 0;
+
+    for (let i = 0; i < totalSections; i += 1) {
+      const take = baseCount + (i < remainder ? 1 : 0);
+      const slice = paragraphBlocks.slice(cursor, cursor + take);
+      cursor += take;
+      const textHtml = slice.length ? slice.join('\n') : '<p class="paragraph">SIN TEXTO.</p>';
+      const image = imagesForSections[i];
+      const imageHtml = image
+        ? `<img src="${image.dataUri}" alt="${image.label}" />`
+        : `<div class="image-placeholder">SIN IMAGEN</div>`;
+      const direction = i === 1 ? 'section reverse' : 'section';
+      sections.push(`
+        <section class="${direction}">
+          <div class="text-block">${textHtml}</div>
+          <div class="image-block">${imageHtml}</div>
+        </section>
+      `);
     }
-    if (imagesHtmlParts.length) {
-      const lastIdx = pageBlocks.length - 1;
-      pageBlocks[lastIdx] = pageBlocks[lastIdx].replace(
-        '</div>',
-        `${imagesHtmlParts.join('\n')}</div>`,
-      );
-    }
+
+    const pageBlocks: string[] = [
+      `<div class="page">${sections.join('\n')}</div>`,
+    ];
 
     const metaLine = meta
-      ? `<p class="meta">Meta: edad ${escapeHtml(String(meta.age_range ?? ''))} anos - habilidad ${escapeHtml(String(meta.skill ?? ''))} - tono ${escapeHtml(String(meta.tone ?? ''))}</p>`
+      ? `<p class="meta">${escapeHtml(toImprenta(`Meta: edad ${String(meta.age_range ?? '')} anos - habilidad ${String(meta.skill ?? '')} - tono ${String(meta.tone ?? '')}`))}</p>`
       : '';
 
     const storyPagesHtml = pageBlocks.join('\n');
@@ -674,16 +855,19 @@ export default function MakerScreen() {
   <meta charset="utf-8" />
   <title>${escapedDisplayTitle}</title>
   <style>
-    @page { size: A4; margin: 24mm 20mm; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f7; color: #1b1b1f; padding: 0; margin: 0; }
-    main { padding: 24px 28px; }
-    h1 { font-size: 22px; margin-bottom: 12px; }
-    .meta { color: #54545a; margin-bottom: 16px; font-size: 13px; }
-    .paragraph { margin-bottom: 14px; line-height: 1.55; }
-    .page { page-break-after: always; padding-bottom: 12px; }
-    .page:last-child { page-break-after: auto; }
-    .image-block { margin: 18px 0; text-align: center; }
-    .image-block img { max-width: 100%; border-radius: 14px; border: 1px solid #d0d0d6; }
+    @page { size: A4; margin: 12mm 10mm; }
+    body { font-family: "Arial Rounded MT Bold", "Trebuchet MS", "Comic Sans MS", sans-serif; background: #fef9f3; color: #1b1b1f; padding: 0; margin: 0; }
+    main { padding: 10px 12px; max-width: 820px; margin: 0 auto; }
+    h1 { font-size: 28px; margin-bottom: 6px; letter-spacing: 1px; text-transform: uppercase; }
+    .meta { color: #3f3f46; margin-bottom: 10px; font-size: 13px; letter-spacing: 0.6px; text-transform: uppercase; }
+    .paragraph { margin-bottom: 6px; line-height: 1.5; font-size: 18px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+    .page { page-break-after: auto; padding-bottom: 6px; display: block; }
+    .section { display: flex; gap: 12px; align-items: stretch; margin-bottom: 14px; }
+    .section.reverse { flex-direction: row-reverse; }
+    .text-block { flex: 1 1 55%; }
+    .image-block { flex: 1 1 45%; background: #0f4e69; border-radius: 12px; padding: 10px; display: flex; align-items: center; justify-content: center; border: 2px solid #0b3142; box-shadow: 0 8px 18px rgba(0,0,0,0.12); min-height: 210px; }
+    .image-block img { width: 100%; height: 100%; object-fit: contain; display: block; border-radius: 8px; }
+    .image-placeholder { color: #e6f4ff; font-size: 14px; font-weight: 700; letter-spacing: 1px; }
   </style>
 </head>
 <body>
@@ -698,9 +882,26 @@ export default function MakerScreen() {
 
   const exportStoryPdf = React.useCallback(async () => {
     if (!storyText?.trim()) throw new Error('No hay cuento para exportar.');
+    setExportingPdf(true);
     const html = await createStoryHtml();
 
+    // Web: abrir ventana con el HTML y lanzar imprimir (expo-print ignora el HTML en web)
+    if (Platform.OS === 'web') {
+      const opened = typeof window !== 'undefined' ? window.open('', '_blank') : null;
+      if (!opened) {
+        setExportingPdf(false);
+        throw new Error('Permite pop-ups para poder generar el PDF.');
+      }
+      opened.document.write(html);
+      opened.document.close();
+      opened.focus();
+      setTimeout(() => opened.print(), 300);
+      setExportingPdf(false);
+      return null;
+    }
+
     if (typeof Print.printToFileAsync !== 'function') {
+      setExportingPdf(false);
       throw new Error('Generar PDF no esta disponible en esta plataforma.');
     }
 
@@ -709,22 +910,26 @@ export default function MakerScreen() {
       const result = await Print.printToFileAsync({ html });
       tempUri = result?.uri;
     } catch (printErr) {
-      if (Platform.OS === 'web') {
-        throw new Error('Guardar cuentos en PDF no esta disponible en la version web todavia. Usa la app nativa para exportar.');
-      }
+      setExportingPdf(false);
       throw printErr;
     }
 
     if (!tempUri) {
+      setExportingPdf(false);
       throw new Error('No se pudo generar el archivo PDF.');
     }
 
     const baseDir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory;
-    if (!baseDir) return tempUri;
+    if (!baseDir) {
+      setExportingPdf(false);
+      return tempUri;
+    }
     const baseTitle = theme?.trim() || DEFAULT_STORY_TITLE;
-    const fileName = `${slugify(`${baseTitle} ${BRAND_SUFFIX}`)}-${Date.now()}.pdf`;
+    const displayTitle = `${baseTitle} ${BRAND_SUFFIX}`;
+    const fileName = `${slugify(displayTitle)}-${Date.now()}.pdf`;
     const targetUri = `${baseDir}${fileName}`;
     await FileSystem.moveAsync({ from: tempUri, to: targetUri });
+    setExportingPdf(false);
     return targetUri;
   }, [createStoryHtml, storyText, theme]);
 
@@ -732,6 +937,7 @@ export default function MakerScreen() {
     if (loggingOut) return;
     setLoggingOut(true);
     try {
+      await clearCurrentSession();
       await logout();
       router.replace(LOGIN_ROUTE);
     } catch (e: any) {
@@ -742,7 +948,7 @@ export default function MakerScreen() {
   }, [logout, loggingOut]);
 
   const handleShare = React.useCallback(async () => {
-    if (!storyText) return;
+    if (!storyText || exportingPdf) return;
     if (!hasIllustrations) {
       Alert.alert('Faltan ilustraciones', 'Primero toca "Ilustrar cuento" para generar las imagenes.');
       return;
@@ -752,6 +958,10 @@ export default function MakerScreen() {
       const baseTitle = theme?.trim() || DEFAULT_STORY_TITLE;
       const dialogTitle = `${baseTitle} ${BRAND_SUFFIX}`;
       const shareMessage = `${dialogTitle}\n\n${storyText}`;
+      if (Platform.OS === 'web' || !pdfUri) {
+        Alert.alert('Abre el PDF', 'Se abrio la opcion del navegador para guardar/imprimir tu cuento en PDF.');
+        return;
+      }
       const canShareFile = await Sharing.isAvailableAsync();
       if (canShareFile) {
         await Sharing.shareAsync(pdfUri, {
@@ -764,12 +974,21 @@ export default function MakerScreen() {
     } catch (e: any) {
       Alert.alert('No se pudo compartir', e?.message || 'Error desconocido');
     }
-  }, [storyText, exportStoryPdf, hasIllustrations, theme]);
+  }, [storyText, exportStoryPdf, hasIllustrations, theme, exportingPdf]);
 
   const saveStory = React.useCallback(async () => {
-    if (!storyText) return;
+    if (!storyText || exportingPdf) return;
     if (!hasIllustrations) {
       Alert.alert('Faltan ilustraciones', 'Genera las ilustraciones antes de guardar el cuento.');
+      return;
+    }
+    if (Platform.OS === 'web') {
+      try {
+        await exportStoryPdf();
+        Alert.alert('Descarga tu PDF', 'Usa la opcion "Guardar como PDF" que abrio el navegador.');
+      } catch (err: any) {
+        Alert.alert('Ups', err?.message || 'No se pudo guardar el cuento.');
+      }
       return;
     }
     const key = 'cuentero_stories';
@@ -783,6 +1002,7 @@ export default function MakerScreen() {
       entryId = String(Date.now());
       const createdAt = new Date().toISOString();
       pdfUri = await exportStoryPdf();
+      if (!pdfUri) throw new Error('No se pudo generar el archivo PDF.');
 
       const metadataPayload: SavedStoryMetadata = {
         id: entryId,
@@ -875,12 +1095,102 @@ export default function MakerScreen() {
     }
   }, [storyText, meta, illustrations, exportStoryPdf, hasIllustrations, theme]);
 
+  const handleNarrationDownload = React.useCallback(async () => {
+    if (Platform.OS === 'web') {
+      Alert.alert('Usa la app móvil', 'La descarga de audio funciona en dispositivo o emulador, no en web.');
+      return;
+    }
+    if (!storyText?.trim()) { Alert.alert('Falta el cuento', 'Genera el cuento primero.'); return; }
+    const currentVoiceId = voiceId || 'shimmer';
+    const cleanedMap = sanitizeAudioMap(audioMap);
+    if (Object.keys(cleanedMap).length !== Object.keys(audioMap).length) {
+      setAudioMap(cleanedMap);
+    }
+    setAudioLoading(true);
+    try {
+      const res = await downloadNarrationToGallery({
+        storyText,
+        voiceId: currentVoiceId,
+        locale: 'es-LATAM',
+      });
+      const uri = res.assetUri || res.fileUri;
+      setAudioMap((prev) => ({ ...prev, [currentVoiceId]: uri }));
+      Alert.alert('Narracion lista', 'Se guardo en tu galeria. Ahora puedes compartirla.');
+    } catch (e: any) {
+      Alert.alert('No se pudo narrar', e?.message || 'Intentalo de nuevo.');
+    } finally {
+      setAudioLoading(false);
+    }
+  }, [storyText, voiceId]);
+
+  const handleShareAudio = React.useCallback(async () => {
+    if (Platform.OS === 'web') {
+      Alert.alert('Usa la app móvil', 'Compartir audio funciona en dispositivo o emulador, no en web.');
+      return;
+    }
+    const uri = audioMap[voiceId] || null;
+    if (!uri) {
+      Alert.alert('Descarga primero', 'Descarga la narracion para poder compartirla.');
+      return;
+    }
+    try {
+      const canShare = await Sharing.isAvailableAsync();
+      const dialogTitle = `${(theme || 'Cuento')} ${BRAND_SUFFIX}`;
+      if (canShare) {
+        await Sharing.shareAsync(uri, { mimeType: 'audio/mpeg', dialogTitle });
+      } else {
+        await Share.share({ message: dialogTitle });
+      }
+    } catch (e: any) {
+      Alert.alert('No se pudo compartir', e?.message || 'Intentalo de nuevo.');
+    }
+  }, [audioMap, voiceId, theme]);
+
+  const handlePreviewVoice = React.useCallback(async (id: string) => {
+    try {
+      setPreviewing(id);
+      const uri = await fetchVoicePreview(id);
+      const { Audio } = await import('expo-av');
+      if (previewSoundRef.current) {
+        await previewSoundRef.current.stopAsync().catch(() => {});
+        await previewSoundRef.current.unloadAsync().catch(() => {});
+        previewSoundRef.current = null;
+      }
+      if (previewObjectUrlRef.current && Platform.OS === 'web') {
+        URL.revokeObjectURL(previewObjectUrlRef.current);
+        previewObjectUrlRef.current = null;
+      }
+      if (Platform.OS === 'web' && uri.startsWith('blob:')) {
+        previewObjectUrlRef.current = uri;
+      }
+      const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true });
+      previewSoundRef.current = sound;
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (!status.isLoaded) return;
+        if (status.didJustFinish) {
+          sound.unloadAsync().catch(() => {});
+          previewSoundRef.current = null;
+          if (previewObjectUrlRef.current && Platform.OS === 'web') {
+            URL.revokeObjectURL(previewObjectUrlRef.current);
+            previewObjectUrlRef.current = null;
+          }
+          setPreviewing(null);
+        }
+      });
+    } catch (e: any) {
+      Alert.alert('No se pudo reproducir la voz', e?.message || 'Intentalo de nuevo.');
+      setPreviewing(null);
+    }
+  }, []);
+
   const onGenerate = React.useCallback(async () => {
     setLoading(true);
+    setExportingPdf(false);
     setStoryText('');
     setMeta(null);
     setIllustrationPlan([]);
     setIllustrations([]);
+    setAudioMap({});
     try {
       const effectiveTheme = themeWithPhilosophy(theme, (ageRange || '2-5') as '2-5' | '6-10');
       const payload = {
@@ -1040,13 +1350,17 @@ ${storyText.slice(0, 900)}`,
                 </View>
                 <View style={{ flexDirection: 'row', marginTop: 12, justifyContent: 'space-between' }}>
                   <View style={{ flexDirection: 'row' }}>
-                    <Pressable onPress={saveStory} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 18 }}>
-                      <Feather name="bookmark" size={20} color={THEME.accent} />
-                      <Text style={{ color: THEME.accent, marginLeft: 6 }}>Guardar</Text>
+                    <Pressable onPress={saveStory} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 18, opacity: exportingPdf ? 0.5 : 1 }}>
+                      {exportingPdf ? (
+                        <ActivityIndicator size="small" color={THEME.accent} />
+                      ) : (
+                        <Feather name="bookmark" size={20} color={THEME.accent} />
+                      )}
+                      <Text style={{ color: THEME.accent, marginLeft: 6 }}>{exportingPdf ? 'Generando PDF...' : 'Guardar'}</Text>
                     </Pressable>
-                    <Pressable onPress={handleShare} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Pressable onPress={handleShare} style={{ flexDirection: 'row', alignItems: 'center', opacity: exportingPdf ? 0.5 : 1 }}>
                       <Feather name="share-2" size={20} color={THEME.accent} />
-                      <Text style={{ color: THEME.accent, marginLeft: 6 }}>Compartir</Text>
+                      <Text style={{ color: THEME.accent, marginLeft: 6 }}>{exportingPdf ? 'Generando...' : 'Compartir'}</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -1075,8 +1389,75 @@ ${storyText.slice(0, 900)}`,
               <StoryReader
                 text={storyText}
                 locale={ageRange === '6-10' ? 'es-AR' : 'es-AR'}
+                voiceLabel={voiceLabel}
+                voiceId={voiceId}
+                audioUri={currentAudioUri}
+                onNarrationReady={(voice, uri) => setAudioMap((prev) => ({ ...prev, [voice]: uri }))}
+                onChooseNarrator={() => setShowVoiceList((v) => !v)}
                 onNarrationStart={() => { if (!music.isPlaying) music.play(); }}
+                onNarrationStop={() => { if (music.isPlaying) music.pause(); }}
               />
+              <View style={{ marginTop: 12, padding: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: THEME.border }}>
+                <Text style={{ color: THEME.text, fontWeight: '700', marginBottom: 8 }}>Narrador</Text>
+                {loadingVoices ? (
+                  <Text style={{ color: THEME.textDim }}>Cargando voces...</Text>
+                ) : (
+                  <View style={{ backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 12, borderWidth: 1, borderColor: THEME.border, padding: 10 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                      <Text style={{ color: THEME.textDim, flexShrink: 1 }}>Narrador actual: {voiceLabel}</Text>
+                    </View>
+                    {showVoiceList ? (
+                      <View style={{ marginTop: 8, gap: 6 }}>
+                        {voiceList.map((v) => (
+                          <View key={v.id} style={{ paddingVertical: 8, paddingHorizontal: 8, borderWidth: 1, borderColor: THEME.border, borderRadius: 10, backgroundColor: voiceId === v.id ? 'rgba(159,210,255,0.08)' : 'transparent' }}>
+                            <Pressable
+                              onPress={() => {
+                                setVoiceId(v.id);
+                                saveVoicePreference(v.id).catch(() => {});
+                              }}
+                              style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}
+                            >
+                              <Feather
+                                name={voiceId === v.id ? 'check-circle' : 'circle'}
+                                size={18}
+                                color={voiceId === v.id ? THEME.accent : THEME.textDim}
+                              />
+                              <View style={{ marginLeft: 8, flex: 1, minWidth: 0 }}>
+                                <Text style={{ color: THEME.text, fontWeight: '700', flexShrink: 1 }}>{v.label}</Text>
+                                <Text style={{ color: THEME.textDim, fontSize: 12 }}>{v.description}</Text>
+                              </View>
+                              <Pressable onPress={() => handlePreviewVoice(v.id)} style={{ marginLeft: 8 }}>
+                                <Text style={{ color: THEME.accent }}>
+                                  {previewing === v.id ? 'Reproduciendo...' : 'Demo'}
+                                </Text>
+                              </Pressable>
+                            </Pressable>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
+                  </View>
+                )}
+
+                <View style={{ height: 12 }} />
+                <Text style={{ color: THEME.textDim, marginBottom: 6, flexShrink: 1 }}>Narracion (guarda en galeria)</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                  <Pressable onPress={handleNarrationDownload} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 8, flexShrink: 1 }}>
+                    <Feather name="bookmark" size={20} color={THEME.accent} />
+                    <Text style={{ color: THEME.accent, marginLeft: 6, flexShrink: 1 }}>
+                      {audioLoading ? 'Narrando...' : currentAudioUri ? 'Re-generar narracion' : 'Guardar narracion'}
+                    </Text>
+                  </Pressable>
+                  <Pressable onPress={handleShareAudio} style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
+                    <Feather name="share-2" size={20} color={THEME.accent} />
+                    <Text style={{ color: THEME.accent, marginLeft: 6, flexShrink: 1 }}>Compartir audio</Text>
+                  </Pressable>
+                </View>
+
+                <Text style={{ color: THEME.textDim, marginTop: 10, fontSize: 12 }}>
+                  Para PDF usa el boton "Guardar" del cuento (arriba), que genera el libro con imagenes grandes.
+                </Text>
+              </View>
             </>
           ) : null}
 

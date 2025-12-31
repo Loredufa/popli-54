@@ -4,6 +4,7 @@ import React from 'react';
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useAuth } from '../src/auth/AuthProvider';
 import Card from '../src/components/Card';
+import BrandLogo from '../src/components/BrandLogo';
 import PrimaryButton from '../src/components/PrimaryButton';
 import { THEME } from '../src/theme';
 
@@ -53,6 +54,7 @@ export default function ChangePasswordScreen() {
             </View>
             <ScrollView contentContainerStyle={{ padding: 16 }}>
                 <Card>
+                    <BrandLogo size={110} style={{ marginBottom: 16 }} />
                     <Field label="Contraseña Actual" value={currentPassword} onChangeText={setCurrentPassword} secureTextEntry />
                     <Field label="Nueva Contraseña" value={newPassword} onChangeText={setNewPassword} secureTextEntry />
                     <Field label="Confirmar Nueva Contraseña" value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry />

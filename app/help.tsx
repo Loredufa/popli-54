@@ -34,6 +34,40 @@ export default function HelpScreen() {
 
                 <View style={{ height: 16 }} />
 
+                <Card title="Guia rapida">
+                    <Text style={{ color: THEME.textDim, lineHeight: 22, marginBottom: 10 }}>
+                        1) Personaliza edad, tema, habilidad, personajes, tono y duracion.
+                    </Text>
+                    <Text style={{ color: THEME.textDim, lineHeight: 22, marginBottom: 10 }}>
+                        2) Toca "Generar cuento" y luego "Ilustrar cuento" para crear 3 escenas clave.
+                    </Text>
+                    <Text style={{ color: THEME.textDim, lineHeight: 22, marginBottom: 10 }}>
+                        3) Escucha la narracion, elige narrador, agrega musica y guarda el PDF.
+                    </Text>
+                </Card>
+
+                <View style={{ height: 16 }} />
+
+                <Card title="Funciones principales">
+                    <Text style={{ color: THEME.textDim, lineHeight: 22, marginBottom: 10 }}>
+                        - Generador de cuentos personalizados con tema, habilidad socioemocional, personajes y tono.
+                    </Text>
+                    <Text style={{ color: THEME.textDim, lineHeight: 22, marginBottom: 10 }}>
+                        - Ilustraciones automaticas (3 escenas) con opcion de re-generar.
+                    </Text>
+                    <Text style={{ color: THEME.textDim, lineHeight: 22, marginBottom: 10 }}>
+                        - Narracion con voces seleccionables y demo de voz.
+                    </Text>
+                    <Text style={{ color: THEME.textDim, lineHeight: 22, marginBottom: 10 }}>
+                        - Musica de fondo con selector de pistas y control de volumen.
+                    </Text>
+                    <Text style={{ color: THEME.textDim, lineHeight: 22, marginBottom: 10 }}>
+                        - Exportar PDF en formato A4 y compartir cuento o audio.
+                    </Text>
+                </Card>
+
+                <View style={{ height: 16 }} />
+
                 <Card title="Preguntas Frecuentes">
                     <FaqItem
                         question="¿Cómo creo un cuento?"
@@ -42,6 +76,34 @@ export default function HelpScreen() {
                     <FaqItem
                         question="¿Puedo guardar los cuentos?"
                         answer="Sí, los cuentos se guardan automáticamente en tu historial reciente."
+                    />
+                    <FaqItem
+                        question="¿Cómo elijo o cambio la voz?"
+                        answer="En el panel 'Narrador' toca 'Elegir narrador' y selecciona la voz. También puedes hacerlo desde Configuración > Voces narradoras y escuchar una demo."
+                    />
+                    <FaqItem
+                        question="¿Cómo escucho el cuento?"
+                        answer="Usa los controles de reproducción (play, pausa y detener) en el lector del cuento. Si no hay voz generada, se crea automáticamente al reproducir."
+                    />
+                    <FaqItem
+                        question="¿Cómo guardo o comparto la narración?"
+                        answer="En el panel de narración toca 'Guardar narración' para generar el audio y 'Compartir audio' para enviarlo."
+                    />
+                    <FaqItem
+                        question="¿Cómo agrego o cambio la musica?"
+                        answer="En 'Elegir musica' selecciona una pista y ajusta el volumen con +/-. El play/pausa controla la musica de fondo."
+                    />
+                    <FaqItem
+                        question="¿Cómo genero las ilustraciones?"
+                        answer="Con el cuento creado, toca 'Ilustrar cuento'. Si quieres otras imagenes, usa 'Re-generar ilustraciones'."
+                    />
+                    <FaqItem
+                        question="¿Cómo guardo el PDF?"
+                        answer="Toca 'Guardar' en el cuento. Se genera un PDF en formato A4 con las imagenes grandes."
+                    />
+                    <FaqItem
+                        question="¿Cómo comparto el cuento?"
+                        answer="Toca 'Compartir' para enviar el PDF o compartir el texto cuando no se pueda adjuntar el archivo."
                     />
                     <FaqItem
                         question="¿Es gratuito?"
