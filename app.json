@@ -57,7 +57,11 @@
       "TTS_VOICES_PATH": "/api/tts/voices",
       "TTS_PREVIEW_PATH": "/api/tts/preview",
       "TTS_NARRATE_PATH": "/api/tts/narrate",
-      "STORY_PDF_PATH": "/api/story/pdf"
+      "STORY_PDF_PATH": "/api/story/pdf",
+      "router": {},
+      "eas": {
+        "projectId": "e139dd0b-c1dd-4f74-b7b3-4ac6c8738542"
+      }
     },
     "updates": {
       "enabled": false
