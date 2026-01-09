@@ -4,7 +4,7 @@
     "slug": "popli-54",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/logo_fondo_claro.png",
+    "icon": "./assets/images/logo.png",
     "scheme": "popli54",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -14,8 +14,8 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/logo_fondo_claro_adaptive.png",
-        "monochromeImage": "./assets/images/logo_fondo_claro_monochrome.png"
+        "foregroundImage": "./assets/images/logo.png",
+        "monochromeImage": "./assets/images/logo.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -45,8 +45,9 @@
       "reactCompiler": true
     },
     "extra": {
-      "API_BASE_URL": "https://poplicuentos-api.vercel.app",
+      "API_BASE_URL_PROD": "https://poplicuentos-api.vercel.app",
       "API_BASE_URL_DEV": "http://localhost:3000",
+      "API_BASE_URL": "https://poplicuentos-api.vercel.app",
       "LOGIN_PATH": "/api/login",
       "REGISTER_PATH": "/api/register",
       "FORGOT_PATH": "/api/auth/request-reset",
@@ -65,6 +66,7 @@
     },
     "updates": {
       "enabled": false
-    }
+    },
+    "owner": "loredufa"
   }
 }

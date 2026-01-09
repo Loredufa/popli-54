@@ -1,7 +1,14 @@
 import React from 'react';
-import { StyleProp, View, ViewStyle } from 'react-native';
+import { Image, StyleProp, View, ViewStyle } from 'react-native';
 
-import LogoFondoOscuro from './icons/LogoFondoOscuro';
+const logoSource = require('../../assets/images/logo.png');
+const LOGO_SHADOW = {
+  shadowColor: '#ffffff',
+  shadowOpacity: 0.5,
+  shadowRadius: 6,
+  shadowOffset: { width: 0, height: 0 },
+  elevation: 4,
+};
 
 type BrandLogoProps = {
   size?: number;
@@ -11,7 +18,11 @@ type BrandLogoProps = {
 export default function BrandLogo({ size = 96, style }: BrandLogoProps) {
   return (
     <View style={[{ alignItems: 'center', justifyContent: 'center' }, style]}>
-      <LogoFondoOscuro width={size} height={size} />
+      <Image
+        source={logoSource}
+        style={[{ width: size, height: size }, LOGO_SHADOW]}
+        resizeMode="contain"
+      />
     </View>
   );
 }

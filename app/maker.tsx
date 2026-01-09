@@ -257,6 +257,8 @@ function extToMime(ext: string) {
 }
 
 const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const BASE64_ENCODING =
+  (FileSystem as any)?.EncodingType?.Base64 ?? 'base64';
 
 function bytesToBase64(bytes: Uint8Array) {
   let output = '';
@@ -281,7 +283,7 @@ function bytesToBase64(bytes: Uint8Array) {
 
 async function readFileAsDataUri(path: string, mime: string) {
   const base64 = await FileSystem.readAsStringAsync(path, {
-    encoding: FileSystem.EncodingType.Base64,
+    encoding: BASE64_ENCODING as FileSystem.EncodingType,
   });
   return `data:${mime};base64,${base64}`;
 }
@@ -335,7 +337,7 @@ async function persistIllustrationAsset(uri: string, slot: IllustrationSlot, ind
   if (uri.startsWith('data:image/')) {
     const base64 = uri.split(',')[1] ?? '';
     await FileSystem.writeAsStringAsync(targetUri, base64, {
-      encoding: FileSystem.EncodingType.Base64,
+      encoding: BASE64_ENCODING as FileSystem.EncodingType,
     });
     return targetUri;
   }

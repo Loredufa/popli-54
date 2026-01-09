@@ -29,6 +29,10 @@ export default function HomeScreen() {
         </View>
       </Animated.View>
 
+      <View style={{ alignItems: 'center', marginBottom: 24 }}>
+        <BrandLogo size={160} />
+      </View>
+
       <Card title="Comienza ahora">
         <PrimaryButton
           label="Registrarme"
@@ -46,4 +50,3 @@ export default function HomeScreen() {
     </View>
   );
 }
-

@@ -5,6 +5,8 @@ import { Platform } from 'react-native';
 import { apiUrl } from './api';
 
 const DEFAULT_TIMEOUT_MS = 45000;
+const BASE64_ENCODING =
+  (FileSystem as any)?.EncodingType?.Base64 ?? 'base64';
 
 async function fetchWithTimeout(resource: RequestInfo | URL, options: RequestInit = {}, timeout = DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -54,7 +56,7 @@ export async function fetchVoicePreview(voiceId: string, locale = 'es-LATAM'): P
     return dataUri;
   }
   const fileUri = `${FileSystem.cacheDirectory}voice-preview-${voiceId}.mp3`;
-  await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+  await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: BASE64_ENCODING as FileSystem.EncodingType });
   console.log('[TTS] preview ready', fileUri);
   return fileUri;
 }
@@ -88,7 +90,7 @@ export async function fetchNarrationTemp(opts: {
     return dataUri;
   }
   const fileUri = `${FileSystem.cacheDirectory}narracion-temp-${Date.now()}.mp3`;
-  await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+  await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: BASE64_ENCODING as FileSystem.EncodingType });
   console.log('[TTS] narrate ready', fileUri);
   return fileUri;
 }
@@ -117,7 +119,7 @@ export async function downloadNarrationToGallery(opts: {
   const buffer = Buffer.from(await res.arrayBuffer());
   const base64 = buffer.toString('base64');
   const fileUri = `${FileSystem.documentDirectory}narracion-${Date.now()}.mp3`;
-  await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+  await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: BASE64_ENCODING as FileSystem.EncodingType });
   const assetUri = await MediaLibrary.saveToLibraryAsync(fileUri);
   return { fileUri, assetUri };
 }

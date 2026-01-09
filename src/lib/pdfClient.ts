@@ -3,6 +3,9 @@ import * as MediaLibrary from 'expo-media-library';
 import { Buffer } from 'buffer';
 import { apiUrl } from './api';
 
+const BASE64_ENCODING =
+  (FileSystem as any)?.EncodingType?.Base64 ?? 'base64';
+
 export async function downloadStoryPdfToGallery(opts: {
   storyText: string;
   title?: string;
@@ -29,7 +32,7 @@ export async function downloadStoryPdfToGallery(opts: {
   const buffer = Buffer.from(await res.arrayBuffer());
   const base64 = buffer.toString('base64');
   const fileUri = `${FileSystem.documentDirectory}cuento-${Date.now()}.pdf`;
-  await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+  await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: BASE64_ENCODING as FileSystem.EncodingType });
   const assetUri = await MediaLibrary.saveToLibraryAsync(fileUri);
   return { fileUri, assetUri };
 }
