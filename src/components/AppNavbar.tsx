@@ -71,9 +71,7 @@ export default function AppNavbar({
           borderColor: THEME.border,
           paddingVertical: 12,
           paddingHorizontal: 16,
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          gap: 10,
         }}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0 }}>
@@ -89,20 +87,20 @@ export default function AppNavbar({
           style={({ pressed }) => ({
             flexDirection: 'row',
             alignItems: 'center',
+            alignSelf: 'flex-start',
             paddingVertical: 8,
             paddingHorizontal: 12,
             borderRadius: 999,
             borderWidth: 1,
             borderColor: THEME.border,
             backgroundColor: pressed || open ? 'rgba(159,210,255,0.12)' : 'transparent',
-            marginLeft: 12,
             gap: 8,
           })}
         >
-          <Text style={{ color: THEME.textDim }} numberOfLines={1}>
+          <Text style={{ color: THEME.textDim, flexShrink: 1 }} numberOfLines={1}>
             {greeting}
           </Text>
-          <Feather name='menu' size={18} color={THEME.accent} />
+          <Feather name="menu" size={18} color={THEME.accent} />
         </Pressable>
       </Animated.View>
 

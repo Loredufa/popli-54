@@ -2,7 +2,13 @@
 import { Feather } from '@expo/vector-icons';
 import * as React from 'react';
 import {
-  Pressable, ScrollView, Text, View, Alert, Platform, ActivityIndicator,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+  Alert,
+  Animated,
+  Easing,
 } from 'react-native';
 import { Audio } from 'expo-av';
 import { fetchNarrationTemp } from '../lib/ttsClient';
@@ -194,24 +200,29 @@ export default function StoryReader({
       </Text>
 
       {/* Controles */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 }}>
         <IconButton icon="play" onPress={playFromStart} disabled={!segments.length || loadingAudio} />
         <IconButton icon="pause" onPress={onPause} disabled={!hasSound || loadingAudio} />
         <IconButton icon="square" onPress={onStop} />
-        {loadingAudio ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <ActivityIndicator color={THEME.accent} size="small" />
-            <Text style={{ color: THEME.textDim, fontSize: 12 }}>
-              {statusText || 'Generando voz...'}
-            </Text>
-          </View>
-        ) : null}
       </View>
+      {loadingAudio ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <SparkSpinner />
+          <Text
+            style={{ color: THEME.textDim, fontSize: 12, flexShrink: 1 }}
+            numberOfLines={2}
+          >
+            {statusText || 'Generando la voz de tu cuento...'}
+          </Text>
+        </View>
+      ) : null}
 
       {/* Nota: la velocidad ya no aplica al audio TTS descargado */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-        <Text style={{ color: THEME.textDim, marginRight: 8 }}>Velocidad (solo lector del dispositivo)</Text>
-        <Text style={{ color: THEME.text, marginLeft: 4 }}>{rate.toFixed(2)}x</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+        <Text style={{ color: THEME.textDim, flexShrink: 1 }}>
+          Velocidad (solo lector del dispositivo)
+        </Text>
+        <Text style={{ color: THEME.text, fontWeight: '600' }}>{rate.toFixed(2)}x</Text>
       </View>
 
       {/* Ir a... */}
@@ -354,3 +365,31 @@ const PageChip = ({
     <Text style={{ color: selected ? THEME.accent : THEME.text }}>{label}</Text>
   </Pressable>
 );
+
+const SparkSpinner = () => {
+  const spin = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 1100,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [spin]);
+
+  const rotate = spin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  return (
+    <Animated.View style={{ transform: [{ rotate }] }}>
+      <Feather name="music" size={16} color={THEME.accent} />
+    </Animated.View>
+  );
+};
