@@ -7,12 +7,24 @@ import { useAuth } from '../src/auth/AuthProvider';
 import Card from '../src/components/Card';
 import { THEME } from '../src/theme';
 import AppNavbar from '../src/components/AppNavbar';
-import { MENU_ITEMS } from '../src/constants/menu';
+import { buildMenuItems } from '../src/constants/menu';
 import { fetchVoices, fetchVoicePreview, type VoiceOption } from '../src/lib/ttsClient';
 import { loadVoicePreference, saveVoicePreference } from '../src/lib/voicePrefs';
+import { useLanguage } from '../src/i18n/LanguageContext';
+import { AppLocale } from '../src/i18n/translations';
+
+const AVAILABLE_LANGUAGES: { value: AppLocale; label: string }[] = [
+    { value: 'es', label: 'Español' },
+    { value: 'en', label: 'English' },
+    { value: 'pt', label: 'Português' },
+    { value: 'ja', label: '日本語' },
+];
 
 export default function SettingsScreen() {
     const { user, logout } = useAuth();
+    const { t, appLocale, setAppLocale } = useLanguage();
+    const menuItems = buildMenuItems(t);
+
     const [voices, setVoices] = React.useState<VoiceOption[]>([]);
     const [selectedVoice, setSelectedVoice] = React.useState<string>('alloy');
     const [loadingVoices, setLoadingVoices] = React.useState(false);
@@ -73,9 +85,9 @@ export default function SettingsScreen() {
 
     return (
         <View style={{ flex: 1, backgroundColor: THEME.bgTop }}>
-            <AppNavbar title="Configuración" menuItems={MENU_ITEMS} onLogout={handleLogout} />
+            <AppNavbar title={t.settings_title} menuItems={menuItems} onLogout={handleLogout} />
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
-                <Card title="Configuración">
+                <Card title={t.settings_title}>
                     <View style={{ marginBottom: 20 }}>
                         <Text style={{ color: THEME.text, fontSize: 18, fontWeight: 'bold' }}>
                             {user?.first_name} {user?.last_name}
@@ -85,15 +97,50 @@ export default function SettingsScreen() {
 
                     <MenuItem
                         icon="lock"
-                        label="Cambiar Contraseña"
+                        label={t.settings_change_password}
                         onPress={() => router.push('/change-password')}
                     />
 
                     <View style={{ height: 1, backgroundColor: THEME.border, marginVertical: 10 }} />
 
-                    <Text style={{ color: THEME.text, fontSize: 16, fontWeight: 'bold', marginBottom: 8 }}>Voces narradoras</Text>
+                    {/* App language selector */}
+                    <Text style={{ color: THEME.text, fontSize: 16, fontWeight: 'bold', marginBottom: 8 }}>
+                        {t.settings_app_language_title}
+                    </Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 16 }}>
+                        {AVAILABLE_LANGUAGES.map(({ value, label }) => (
+                            <TouchableOpacity
+                                key={value}
+                                onPress={() => setAppLocale(value)}
+                                style={{
+                                    paddingVertical: 6,
+                                    paddingHorizontal: 14,
+                                    borderRadius: 999,
+                                    borderWidth: 1,
+                                    borderColor: appLocale === value ? THEME.primary : THEME.border,
+                                    backgroundColor: appLocale === value ? 'rgba(90,160,255,0.15)' : 'transparent',
+                                    marginRight: 8,
+                                    marginBottom: 8,
+                                }}
+                            >
+                                <Text style={{
+                                    color: appLocale === value ? THEME.accent : THEME.textDim,
+                                    fontWeight: appLocale === value ? '700' : '400',
+                                    fontSize: 14,
+                                }}>
+                                    {label}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+
+                    <View style={{ height: 1, backgroundColor: THEME.border, marginVertical: 10 }} />
+
+                    <Text style={{ color: THEME.text, fontSize: 16, fontWeight: 'bold', marginBottom: 8 }}>
+                        {t.settings_voices_title}
+                    </Text>
                     {loadingVoices ? (
-                      <Text style={{ color: THEME.textDim, marginBottom: 12 }}>Cargando voces...</Text>
+                      <Text style={{ color: THEME.textDim, marginBottom: 12 }}>{t.settings_loading_voices}</Text>
                     ) : voices.map((voice) => (
                       <TouchableOpacity
                         key={voice.id}
@@ -123,7 +170,7 @@ export default function SettingsScreen() {
                             }}
                           >
                             <Text style={{ color: THEME.text }}>
-                              {previewing === voice.id ? 'Reproduciendo...' : 'Escuchar demo'}
+                              {previewing === voice.id ? t.settings_playing : t.settings_listen_demo}
                             </Text>
                           </TouchableOpacity>
                         </View>
@@ -131,7 +178,7 @@ export default function SettingsScreen() {
                     ))}
 
                     <Text style={{ color: THEME.textDim, fontSize: 12, textAlign: 'center', marginTop: 20 }}>
-                        Versión 1.0.0
+                        {t.settings_version}
                     </Text>
                 </Card>
             </ScrollView>

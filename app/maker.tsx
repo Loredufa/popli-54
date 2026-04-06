@@ -36,7 +36,8 @@ const THEME = {
 };
 const HOME_ROUTE = '/(tabs)/index' as Href;
 const LOGIN_ROUTE = '/login' as Href;
-import { MENU_ITEMS } from '../src/constants/menu';
+import { buildMenuItems } from '../src/constants/menu';
+import { useLanguage } from '../src/i18n/LanguageContext';
 
 
 
@@ -52,9 +53,33 @@ const AGE_OPTIONS = [
   { value: '6-10' as const, label: '6-10 anos' },
 ];
 
-/* ---- Semillas filosoficas (solo 6-10) ---- */
-const PHILO_SEEDS = [
-  'amistad y justicia', 'verdad vs opinion', 'responsabilidad y consecuencias', 'identidad y cambio', 'perspectivas multiples', 'reglas y acuerdos', 'bien comun',
+/* ---- Idioma del cuento ---- */
+const STORY_LANGUAGE_OPTIONS = [
+  { value: 'es' as const, label: 'Español' },
+  { value: 'en' as const, label: 'English' },
+  { value: 'pt' as const, label: 'Português' },
+  { value: 'ja' as const, label: '日本語' },
+];
+
+/* ---- Categorías narrativas ---- */
+type StoryCategory = 'disparatado' | 'literario' | 'rimas' | 'poesia';
+const CATEGORY_OPTIONS: { value: StoryCategory; tKey: string }[] = [
+  { value: 'disparatado', tKey: 'category_disparatado' },
+  { value: 'literario', tKey: 'category_literario' },
+  { value: 'rimas', tKey: 'category_rimas' },
+  { value: 'poesia', tKey: 'category_poesia' },
+];
+
+/* ---- Géneros (solo 6-10) ---- */
+const GENRE_OPTIONS: { value: string; tKey: string }[] = [
+  { value: 'misterio', tKey: 'genre_misterio' },
+  { value: 'emocion', tKey: 'genre_emocion' },
+  { value: 'ficcion', tKey: 'genre_ficcion' },
+  { value: 'amor', tKey: 'genre_amor' },
+  { value: 'terror', tKey: 'genre_terror' },
+  { value: 'aventura', tKey: 'genre_aventura' },
+  { value: 'ciencia_ficcion', tKey: 'genre_ciencia_ficcion' },
+  { value: 'fantasia', tKey: 'genre_fantasia' },
 ];
 
 const VOICE_LABELS: Record<string, string> = {
@@ -62,11 +87,6 @@ const VOICE_LABELS: Record<string, string> = {
   nova: 'Voz aventura (Nova)',
   alloy: 'Voz calida (Alloy)',
 };
-
-function themeWithPhilosophy(theme: string, age: '2-5' | '6-10') {
-  if (age !== '6-10') return theme;
-  return `${theme}. Integra de forma sutil semillas filosoficas apropiadas para 6-10: ${PHILO_SEEDS.join(', ')}. Usa metaforas, micro-dilemas amables y 1-2 preguntas abiertas de un mentor; evita sermonear y no menciones la palabra "filosofia".`;
-}
 
 /* ---------------- HELPERS ---------------- */
 function extractJsonBlock(text: string) {
@@ -534,6 +554,8 @@ const PrimaryButton: React.FC<{ label: string; icon?: keyof typeof Feather.glyph
 /* -------------------- SCREEN -------------------- */
 export default function MakerScreen() {
   const { user, logout, loading: authLoading } = useAuth();
+  const { t, appLocale } = useLanguage();
+  const menuItems = buildMenuItems(t);
   const [ageRange, setAgeRange] = React.useState<'2-5' | '6-10' | ''>('');
   const [theme, setTheme] = React.useState('');
   const [skill, setSkill] = React.useState('');
@@ -541,6 +563,10 @@ export default function MakerScreen() {
   const [tone, setTone] = React.useState<'tierno' | 'aventurero' | 'humor'>('tierno');
   const [locale] = React.useState<'es-AR' | 'es-LATAM'>('es-LATAM');
   const [minutes, setMinutes] = React.useState(4);
+  const [storyLanguage, setStoryLanguage] = React.useState<'es' | 'en' | 'pt' | 'ja'>('es');
+  const [category, setCategory] = React.useState<StoryCategory | ''>('');
+  const [genre, setGenre] = React.useState('');
+  const hasOverriddenStoryLanguage = React.useRef(false);
 
   const [loading, setLoading] = React.useState(false);
   const [storyText, setStoryText] = React.useState('');
@@ -587,6 +613,18 @@ export default function MakerScreen() {
       router.replace(LOGIN_ROUTE);
     }
   }, [authLoading, user]);
+
+  // Sync story language with app locale unless user has overridden it manually
+  React.useEffect(() => {
+    if (!hasOverriddenStoryLanguage.current) {
+      setStoryLanguage(appLocale as 'es' | 'en' | 'pt' | 'ja');
+    }
+  }, [appLocale]);
+
+  // Reset genre when switching to 2-5 age group
+  React.useEffect(() => {
+    if (ageRange !== '6-10') setGenre('');
+  }, [ageRange]);
 
   React.useEffect(() => {
     let alive = true;
@@ -725,8 +763,8 @@ export default function MakerScreen() {
 
   const illustrateButtonLabel = React.useMemo(() => {
     if (imgLoading) return 'Ilustrando...';
-    return hasIllustrations ? 'Re-generar ilustraciones' : 'Ilustrar cuento';
-  }, [imgLoading, hasIllustrations]);
+    return hasIllustrations ? t.btn_reillustrate : t.btn_illustrate;
+  }, [imgLoading, hasIllustrations, t]);
 
   const renderIllustrationItem = (item: IllustrationResult, key: string) => {
     if (!item.uri) {
@@ -1102,7 +1140,7 @@ export default function MakerScreen() {
       Alert.alert('Usa la app móvil', 'La descarga de audio funciona en dispositivo o emulador, no en web.');
       return;
     }
-    if (!storyText?.trim()) { Alert.alert('Falta el cuento', 'Genera el cuento primero.'); return; }
+    if (!storyText?.trim()) { Alert.alert(t.alert_missing_story_title, t.alert_missing_story_msg); return; }
     const currentVoiceId = voiceId || 'shimmer';
     const cleanedMap = sanitizeAudioMap(audioMap);
     if (Object.keys(cleanedMap).length !== Object.keys(audioMap).length) {
@@ -1117,7 +1155,7 @@ export default function MakerScreen() {
       });
       const uri = res.assetUri || res.fileUri;
       setAudioMap((prev) => ({ ...prev, [currentVoiceId]: uri }));
-      Alert.alert('Narracion lista', 'Se guardo en tu galeria. Ahora puedes compartirla.');
+      Alert.alert(t.alert_narration_ready_title, t.alert_narration_ready_msg);
     } catch (e: any) {
       Alert.alert('No se pudo narrar', e?.message || 'Intentalo de nuevo.');
     } finally {
@@ -1132,7 +1170,7 @@ export default function MakerScreen() {
     }
     const uri = audioMap[voiceId] || null;
     if (!uri) {
-      Alert.alert('Descarga primero', 'Descarga la narracion para poder compartirla.');
+      Alert.alert(t.alert_no_audio_title, t.alert_no_audio_msg);
       return;
     }
     try {
@@ -1194,15 +1232,17 @@ export default function MakerScreen() {
     setIllustrations([]);
     setAudioMap({});
     try {
-      const effectiveTheme = themeWithPhilosophy(theme, (ageRange || '2-5') as '2-5' | '6-10');
       const payload = {
         age_range: ageRange,
-        theme: effectiveTheme,
+        theme,
         skill,
         characters: characters || 'protagonista sin nombre y un amigo imaginario',
         locale,
         tone,
         reading_time_minutes: minutes,
+        story_language: storyLanguage,
+        category: category || undefined,
+        genre: ageRange === '6-10' && genre ? genre : undefined,
       };
       const content = await callBackend(payload);
       const metaJson = extractJsonBlock(content);
@@ -1214,13 +1254,13 @@ export default function MakerScreen() {
     } catch (e: any) {
       Alert.alert('No se pudo generar', e?.message || 'Error desconocido');
     } finally { setLoading(false); }
-  }, [ageRange, theme, skill, characters, tone, locale, minutes]);
+  }, [ageRange, theme, skill, characters, tone, locale, minutes, storyLanguage, category, genre]);
 
   const onIllustrate = React.useCallback(async () => {
-    if (!storyText) { Alert.alert('Falta el cuento', 'Primero genera el cuento.'); return; }
+    if (!storyText) { Alert.alert(t.alert_missing_story_title, t.alert_missing_story_msg); return; }
     setImgLoading(true);
     try {
-      const effectiveTheme = themeWithPhilosophy(theme || 'cuento infantil', (ageRange || '2-5') as '2-5' | '6-10');
+      const effectiveTheme = theme || 'cuento infantil';
       const plan = illustrationPlan.length ? illustrationPlan : buildIllustrationPlan(storyText);
 
       const results = await Promise.all(
@@ -1272,31 +1312,81 @@ ${storyText.slice(0, 900)}`,
         <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 64 }} showsVerticalScrollIndicator={false}>
           <AppNavbar
             name={greetingName || undefined}
-            menuItems={MENU_ITEMS}
+            menuItems={menuItems}
             onLogout={handleLogout}
             loggingOut={loggingOut}
           />
 
-          <CardBox title="Personalizacion">
+          <CardBox title={t.maker_customization_title}>
+            {/* Age range */}
             <View style={{ flexDirection: 'row', marginBottom: 12 }}>
-              {AGE_OPTIONS.map(({ value, label }) => (<Chip key={value} label={label} selected={ageRange === value} onPress={() => setAgeRange(value)} />))}
+              {AGE_OPTIONS.map(({ value }) => (
+                <Chip
+                  key={value}
+                  label={value === '2-5' ? t.age_2_5 : t.age_6_10}
+                  selected={ageRange === value}
+                  onPress={() => setAgeRange(value)}
+                />
+              ))}
             </View>
 
-            <Text style={{ color: THEME.textDim, marginBottom: 6 }}>Tema central</Text>
-            <TextInput placeholder="p. ej., miedo a la oscuridad" placeholderTextColor="#8fa0c2" value={theme} onChangeText={setTheme} style={{ color: THEME.text, borderColor: THEME.border, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12 }} />
+            {/* Genre — only for 6-10 */}
+            {ageRange === '6-10' && (
+              <>
+                <Text style={{ color: THEME.textDim, marginBottom: 6 }}>{t.maker_genre_label}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                  <View style={{ flexDirection: 'row', paddingRight: 8 }}>
+                    {GENRE_OPTIONS.map(({ value, tKey }) => (
+                      <Chip
+                        key={value}
+                        label={(t as any)[tKey] || value}
+                        selected={genre === value}
+                        onPress={() => setGenre(genre === value ? '' : value)}
+                      />
+                    ))}
+                  </View>
+                </ScrollView>
+              </>
+            )}
 
-            <Text style={{ color: THEME.textDim, marginBottom: 6 }}>Habilidad socioemocional</Text>
+            <Text style={{ color: THEME.textDim, marginBottom: 6 }}>{t.maker_central_theme_label}</Text>
+            <TextInput placeholder={t.maker_central_theme_placeholder} placeholderTextColor="#8fa0c2" value={theme} onChangeText={setTheme} style={{ color: THEME.text, borderColor: THEME.border, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12 }} />
+
+            <Text style={{ color: THEME.textDim, marginBottom: 6 }}>{t.maker_skill_label}</Text>
             {skillsContent}
 
-            <Text style={{ color: THEME.textDim, marginBottom: 6 }}>Personajes (nombres/comas)</Text>
-            <TextInput placeholder="Luna (prota), Tito (amigo)" placeholderTextColor="#8fa0c2" value={characters} onChangeText={setCharacters} style={{ color: THEME.text, borderColor: THEME.border, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12 }} />
+            <Text style={{ color: THEME.textDim, marginBottom: 6 }}>{t.maker_characters_label}</Text>
+            <TextInput placeholder={t.maker_characters_placeholder} placeholderTextColor="#8fa0c2" value={characters} onChangeText={setCharacters} style={{ color: THEME.text, borderColor: THEME.border, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12 }} />
 
+            {/* Tone chips */}
             <View style={{ flexDirection: 'row', marginBottom: 12 }}>
-              {(['tierno', 'aventurero', 'humor'] as const).map((t) => (<Chip key={t} label={t} selected={tone === t} onPress={() => setTone(t)} />))}
+              {(['tierno', 'aventurero', 'humor'] as const).map((toneVal) => (
+                <Chip
+                  key={toneVal}
+                  label={(t as any)[`tone_${toneVal}`] || toneVal}
+                  selected={tone === toneVal}
+                  onPress={() => setTone(toneVal)}
+                />
+              ))}
             </View>
 
+            {/* Narrative category */}
+            <Text style={{ color: THEME.textDim, marginBottom: 6 }}>{t.maker_category_label}</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', paddingRight: 8 }}>
+                {CATEGORY_OPTIONS.map(({ value, tKey }) => (
+                  <Chip
+                    key={value}
+                    label={(t as any)[tKey] || value}
+                    selected={category === value}
+                    onPress={() => setCategory(category === value ? '' : value)}
+                  />
+                ))}
+              </View>
+            </ScrollView>
+
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ color: THEME.textDim }}>Duracion: {minutes} min</Text>
+              <Text style={{ color: THEME.textDim }}>{t.maker_duration_label}: {minutes} min</Text>
               <View style={{ flexDirection: 'row' }}>
                 <Pressable onPress={() => setMinutes(m => Math.max(2, m - 1))} style={{ marginRight: 8 }}>
                   <Feather name="minus-circle" size={22} color={THEME.accent} />
@@ -1307,16 +1397,34 @@ ${storyText.slice(0, 900)}`,
               </View>
             </View>
 
+            {/* Story language selector */}
+            <Text style={{ color: THEME.textDim, marginTop: 12, marginBottom: 6 }}>{t.maker_story_language_label}</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', paddingRight: 8 }}>
+                {STORY_LANGUAGE_OPTIONS.map(({ value, label }) => (
+                  <Chip
+                    key={value}
+                    label={label}
+                    selected={storyLanguage === value}
+                    onPress={() => {
+                      hasOverriddenStoryLanguage.current = true;
+                      setStoryLanguage(value);
+                    }}
+                  />
+                ))}
+              </View>
+            </ScrollView>
+
             <View style={{ height: 12 }} />
-            <PrimaryButton label={loading ? 'Generando...' : 'Generar cuento'} icon="moon" disabled={!canGenerate} onPress={onGenerate} />
+            <PrimaryButton label={loading ? t.btn_generating : t.btn_generate} icon="moon" disabled={!canGenerate} onPress={onGenerate} />
           </CardBox>
 
           <View style={{ height: 16 }} />
-          <CardBox title="Tu cuento">
+          <CardBox title={t.maker_your_story_title}>
             {loading ? (
               <View style={{ paddingVertical: 24, alignItems: 'center' }}>
                 <ActivityIndicator color={THEME.accent} size="large" />
-                <Text style={{ color: THEME.textDim, marginTop: 12 }}>Creando una historia suave y luminosa...</Text>
+                <Text style={{ color: THEME.textDim, marginTop: 12 }}>{t.story_generating_message}</Text>
               </View>
             ) : storyText ? (
               <>
@@ -1358,11 +1466,11 @@ ${storyText.slice(0, 900)}`,
                       ) : (
                         <Feather name="bookmark" size={20} color={THEME.accent} />
                       )}
-                      <Text style={{ color: THEME.accent, marginLeft: 6 }}>{exportingPdf ? 'Generando PDF...' : 'Guardar'}</Text>
+                      <Text style={{ color: THEME.accent, marginLeft: 6 }}>{exportingPdf ? t.btn_generating_pdf : t.btn_save}</Text>
                     </Pressable>
                     <Pressable onPress={handleShare} style={{ flexDirection: 'row', alignItems: 'center', opacity: exportingPdf ? 0.5 : 1 }}>
                       <Feather name="share-2" size={20} color={THEME.accent} />
-                      <Text style={{ color: THEME.accent, marginLeft: 6 }}>{exportingPdf ? 'Generando...' : 'Compartir'}</Text>
+                      <Text style={{ color: THEME.accent, marginLeft: 6 }}>{exportingPdf ? '...' : t.btn_share}</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -1377,7 +1485,7 @@ ${storyText.slice(0, 900)}`,
               </>
             ) : (
               <Text style={{ color: THEME.textDim }}>
-                Tu cuento aparecera aqui. Completa el formulario y toca "Generar".
+                {t.story_empty_placeholder}
               </Text>
             )}
           </CardBox>
@@ -1402,7 +1510,7 @@ ${storyText.slice(0, 900)}`,
               <View style={{ marginTop: 12, padding: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: THEME.border }}>
                 <Text style={{ color: THEME.text, fontWeight: '700', marginBottom: 8 }}>Narrador</Text>
                 {loadingVoices ? (
-                  <Text style={{ color: THEME.textDim }}>Cargando voces...</Text>
+                  <Text style={{ color: THEME.textDim }}>{t.settings_loading_voices}</Text>
                 ) : (
                   <View style={{ backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 12, borderWidth: 1, borderColor: THEME.border, padding: 10 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
@@ -1430,7 +1538,7 @@ ${storyText.slice(0, 900)}`,
                               </View>
                               <Pressable onPress={() => handlePreviewVoice(v.id)} style={{ marginLeft: 8 }}>
                                 <Text style={{ color: THEME.accent }}>
-                                  {previewing === v.id ? 'Reproduciendo...' : 'Demo'}
+                                  {previewing === v.id ? t.settings_playing : 'Demo'}
                                 </Text>
                               </Pressable>
                             </Pressable>
@@ -1447,12 +1555,12 @@ ${storyText.slice(0, 900)}`,
                   <Pressable onPress={handleNarrationDownload} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 8, flexShrink: 1 }}>
                     <Feather name="bookmark" size={20} color={THEME.accent} />
                     <Text style={{ color: THEME.accent, marginLeft: 6, flexShrink: 1 }}>
-                      {audioLoading ? 'Narrando...' : currentAudioUri ? 'Re-generar narracion' : 'Guardar narracion'}
+                      {audioLoading ? 'Narrando...' : currentAudioUri ? t.alert_narration_ready_title : 'Guardar narracion'}
                     </Text>
                   </Pressable>
                   <Pressable onPress={handleShareAudio} style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
                     <Feather name="share-2" size={20} color={THEME.accent} />
-                    <Text style={{ color: THEME.accent, marginLeft: 6, flexShrink: 1 }}>Compartir audio</Text>
+                    <Text style={{ color: THEME.accent, marginLeft: 6, flexShrink: 1 }}>{t.btn_share} audio</Text>
                   </Pressable>
                 </View>
 
