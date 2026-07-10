@@ -23,10 +23,6 @@ export type TranslationKeys = {
   maker_story_language_label: string;
   maker_category_label: string;
   maker_genre_label: string;
-  // Tone chips
-  tone_tierno: string;
-  tone_aventurero: string;
-  tone_humor: string;
   // Age chips
   age_2_5: string;
   age_6_10: string;
@@ -34,11 +30,8 @@ export type TranslationKeys = {
   category_disparatado: string;
   category_literario: string;
   category_rimas: string;
-  category_poesia: string;
   // Genre chips (6-10)
   genre_misterio: string;
-  genre_emocion: string;
-  genre_ficcion: string;
   genre_amor: string;
   genre_terror: string;
   genre_aventura: string;
@@ -91,18 +84,12 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     maker_story_language_label: 'Idioma del cuento',
     maker_category_label: 'Categoría narrativa',
     maker_genre_label: 'Género (6-10 años)',
-    tone_tierno: 'tierno',
-    tone_aventurero: 'aventurero',
-    tone_humor: 'humor',
     age_2_5: '2-5 años',
     age_6_10: '6-10 años',
     category_disparatado: 'Disparatado',
     category_literario: 'Literario',
-    category_rimas: 'Rimas',
-    category_poesia: 'Poesía',
+    category_rimas: 'Rimas y Poesía',
     genre_misterio: 'Misterio',
-    genre_emocion: 'Emoción',
-    genre_ficcion: 'Ficción',
     genre_amor: 'Amor',
     genre_terror: 'Terror',
     genre_aventura: 'Aventura',
@@ -149,18 +136,12 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     maker_story_language_label: 'Story language',
     maker_category_label: 'Narrative category',
     maker_genre_label: 'Genre (ages 6-10)',
-    tone_tierno: 'tender',
-    tone_aventurero: 'adventurous',
-    tone_humor: 'humor',
     age_2_5: '2-5 years',
     age_6_10: '6-10 years',
     category_disparatado: 'Wacky',
     category_literario: 'Literary',
-    category_rimas: 'Rhymes',
-    category_poesia: 'Poetry',
+    category_rimas: 'Rhymes & Poetry',
     genre_misterio: 'Mystery',
-    genre_emocion: 'Emotion',
-    genre_ficcion: 'Fiction',
     genre_amor: 'Love',
     genre_terror: 'Horror',
     genre_aventura: 'Adventure',
@@ -207,18 +188,12 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     maker_story_language_label: 'Idioma da história',
     maker_category_label: 'Categoria narrativa',
     maker_genre_label: 'Gênero (6-10 anos)',
-    tone_tierno: 'terno',
-    tone_aventurero: 'aventureiro',
-    tone_humor: 'humor',
     age_2_5: '2-5 anos',
     age_6_10: '6-10 anos',
     category_disparatado: 'Disparatado',
     category_literario: 'Literário',
-    category_rimas: 'Rimas',
-    category_poesia: 'Poesia',
+    category_rimas: 'Rimas e Poesia',
     genre_misterio: 'Mistério',
-    genre_emocion: 'Emoção',
-    genre_ficcion: 'Ficção',
     genre_amor: 'Amor',
     genre_terror: 'Terror',
     genre_aventura: 'Aventura',
@@ -265,18 +240,12 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     maker_story_language_label: 'お話の言語',
     maker_category_label: '物語のカテゴリ',
     maker_genre_label: 'ジャンル（6〜10歳）',
-    tone_tierno: 'やさしい',
-    tone_aventurero: 'ぼうけん',
-    tone_humor: 'ユーモア',
     age_2_5: '2〜5歳',
     age_6_10: '6〜10歳',
     category_disparatado: 'おかしな話',
     category_literario: '文学的',
-    category_rimas: '韻を踏む',
-    category_poesia: '詩',
+    category_rimas: '韻・詩',
     genre_misterio: 'ミステリー',
-    genre_emocion: '感動',
-    genre_ficcion: 'フィクション',
     genre_amor: '愛',
     genre_terror: 'ホラー',
     genre_aventura: '冒険',

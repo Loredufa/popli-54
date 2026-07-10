@@ -62,19 +62,16 @@ const STORY_LANGUAGE_OPTIONS = [
 ];
 
 /* ---- Categorías narrativas ---- */
-type StoryCategory = 'disparatado' | 'literario' | 'rimas' | 'poesia';
+type StoryCategory = 'disparatado' | 'literario' | 'rimas';
 const CATEGORY_OPTIONS: { value: StoryCategory; tKey: string }[] = [
   { value: 'disparatado', tKey: 'category_disparatado' },
   { value: 'literario', tKey: 'category_literario' },
   { value: 'rimas', tKey: 'category_rimas' },
-  { value: 'poesia', tKey: 'category_poesia' },
 ];
 
 /* ---- Géneros (solo 6-10) ---- */
 const GENRE_OPTIONS: { value: string; tKey: string }[] = [
   { value: 'misterio', tKey: 'genre_misterio' },
-  { value: 'emocion', tKey: 'genre_emocion' },
-  { value: 'ficcion', tKey: 'genre_ficcion' },
   { value: 'amor', tKey: 'genre_amor' },
   { value: 'terror', tKey: 'genre_terror' },
   { value: 'aventura', tKey: 'genre_aventura' },
@@ -560,7 +557,6 @@ export default function MakerScreen() {
   const [theme, setTheme] = React.useState('');
   const [skill, setSkill] = React.useState('');
   const [characters, setCharacters] = React.useState('');
-  const [tone, setTone] = React.useState<'tierno' | 'aventurero' | 'humor'>('tierno');
   const [locale] = React.useState<'es-AR' | 'es-LATAM'>('es-LATAM');
   const [minutes, setMinutes] = React.useState(4);
   const [storyLanguage, setStoryLanguage] = React.useState<'es' | 'en' | 'pt' | 'ja'>('es');
@@ -696,12 +692,17 @@ export default function MakerScreen() {
   }, [user]);
 
   const canGenerate = !!ageRange && !!theme && !!skill && !loading;
-  const voiceLabel = React.useMemo(() => VOICE_LABELS[voiceId] || voiceId, [voiceId]);
-  const voiceList = React.useMemo(() => voices.length ? voices : [
-    { id: 'shimmer', label: 'Voz tierna (Shimmer)', description: 'Dulce y amable', idealFor: '', timbre: '' },
-    { id: 'nova', label: 'Voz aventura (Nova)', description: 'Expresiva y dinamica', idealFor: '', timbre: '' },
-    { id: 'alloy', label: 'Voz calida (Alloy)', description: 'Narrador neutro y cercano', idealFor: '', timbre: '' },
-  ], [voices]);
+  const voiceLabel = React.useMemo(() => {
+    return VOICE_LABELS[voiceId] || voiceId;
+  }, [voiceId]);
+
+  const voiceList = React.useMemo<VoiceOption[]>(() => {
+    return voices.length ? voices : [
+      { id: 'shimmer', label: 'Voz tierna (Shimmer)', description: 'Dulce y amable', idealFor: '', timbre: '' },
+      { id: 'nova', label: 'Voz aventura (Nova)', description: 'Expresiva y dinamica', idealFor: '', timbre: '' },
+      { id: 'alloy', label: 'Voz calida (Alloy)', description: 'Narrador neutro y cercano', idealFor: '', timbre: '' },
+    ];
+  }, [voices]);
   const currentAudioUri = audioMap[voiceId] || null;
 
   const skillsContent = React.useMemo(() => (
@@ -809,17 +810,19 @@ export default function MakerScreen() {
     const displayTitle = `${baseTitle} ${BRAND_SUFFIX}`;
     const displayTitleUpper = toImprenta(displayTitle);
     const escapedDisplayTitle = escapeHtml(displayTitleUpper);
-    const imagesForSections: Array<{ dataUri: string; label: string }> = [];
+
+    const imagesForSections: Array<{ dataUri: string; label: string } | null> = [];
     for (const [idx, item] of planWithResults.entries()) {
-      if (!item.uri) continue;
+      if (!item.uri) {
+        imagesForSections.push(null);
+        continue;
+      }
       try {
         const dataUri = await ensureDataUri(item.uri, item.slot, idx);
-        imagesForSections.push({
-          dataUri,
-          label: `${escapeHtml(item.label)}-${idx + 1}`,
-        });
+        imagesForSections.push({ dataUri, label: `${escapeHtml(item.label)}-${idx + 1}` });
       } catch (imageErr) {
         console.warn('No se pudo incluir ilustracion en PDF', item.uri, imageErr);
+        imagesForSections.push(null);
       }
     }
 
@@ -827,95 +830,134 @@ export default function MakerScreen() {
     const paragraphBlocks = paragraphSource
       .map((block) => `<p class="paragraph">${escapeHtml(toImprenta(block))}</p>`);
 
+    // Stars: golden-angle distribution for uniform coverage
+    const makeStarsSvg = (count: number) => {
+      const circles = Array.from({ length: count }, (_, i) => {
+        const cx = ((i * 137.508) % 100).toFixed(1);
+        const cy = ((i * 73.137) % 100).toFixed(1);
+        const r  = [0.7, 1, 1.2, 1.5, 0.8][i % 5];
+        const op = [0.35, 0.55, 0.7, 0.85, 0.5, 0.65][i % 6];
+        const fill = i % 8 === 0 ? '#9fd2ff' : i % 5 === 0 ? '#c8e8ff' : 'white';
+        return `<circle cx="${cx}%" cy="${cy}%" r="${r}" fill="${fill}" opacity="${op}"/>`;
+      }).join('');
+      return `<div class="stars"><svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">${circles}</svg></div>`;
+    };
+    const STARS = makeStarsSvg(55);
+
+    const CSS = `
+    @page { size: A4; margin: 15mm 18mm; }
+    * { box-sizing: border-box; }
+    body { font-family: "Arial Rounded MT Bold", "Trebuchet MS", "Comic Sans MS", sans-serif;
+           background: #0e1630; color: #e7eefc; margin: 0; padding: 0;
+           -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .page { page-break-after: always; min-height: 227mm;
+            display: flex; flex-direction: column; padding: 0;
+            position: relative; overflow: hidden;
+            background: linear-gradient(160deg, #0e1630 0%, #162040 55%, #0a1220 100%);
+            -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .stars { position: absolute; inset: 0; width: 100%; height: 100%;
+             pointer-events: none; z-index: 0; }
+    .glow { position: absolute; border-radius: 50%; pointer-events: none; z-index: 0;
+            filter: blur(40px); -webkit-filter: blur(40px); }
+    .glow-center { width: 280px; height: 280px; top: 30%; left: 50%;
+                   transform: translate(-50%, -50%);
+                   background: radial-gradient(circle, rgba(90,160,255,0.18) 0%, transparent 70%); }
+    .glow-bottom { width: 200px; height: 160px; bottom: 10%; right: 15%;
+                   background: radial-gradient(circle, rgba(90,160,255,0.1) 0%, transparent 70%); }
+    .page-inner { position: relative; z-index: 1; display: flex; flex-direction: column;
+                  flex: 1; min-height: 227mm; padding: 0; }
+    .cover { align-items: center; text-align: center; padding: 22mm 12mm 16mm; gap: 8mm; }
+    .cover-title { font-size: 38px; font-weight: 900; letter-spacing: 2px;
+                   text-transform: uppercase; color: #e7eefc; line-height: 1.2;
+                   margin: 0 0 8px 0;
+                   text-shadow: 0 0 24px rgba(90,160,255,0.6), 0 2px 8px rgba(0,0,0,0.9); }
+    .cover-brand { font-size: 15px; font-weight: 700; letter-spacing: 4px;
+                   text-transform: uppercase; color: #9fd2ff; margin: 0; }
+    .cover-image { max-width: 260px; margin: 10mm auto 0; border-radius: 16px; overflow: hidden;
+                   border: 2px solid rgba(90,160,255,0.45);
+                   box-shadow: 0 0 24px rgba(90,160,255,0.25); }
+    .cover-image img { width: 100%; height: auto; display: block; border-radius: 14px; }
+    .story-page .page-inner { justify-content: flex-start; }
+    .image-wrap { width: 100%; border-radius: 16px; overflow: hidden; margin-bottom: 8mm;
+                  border: 2px solid rgba(90,160,255,0.3);
+                  box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+    .image-wrap img { width: 100%; height: auto; display: block; }
+    .image-wrap-bottom { margin-bottom: 0; margin-top: 8mm; }
+    .text-block { flex: 1; }
+    .paragraph { font-size: 26px; font-weight: 800; letter-spacing: 1.5px;
+                 line-height: 1.65; text-transform: uppercase; margin: 0 0 10px 0;
+                 color: #e7eefc;
+                 text-shadow: 0 1px 6px rgba(0,0,0,0.7); }
+    .page-num { font-size: 13px; font-weight: 700; letter-spacing: 3px;
+                text-transform: uppercase; color: #9fd2ff; text-align: center;
+                margin-top: auto; padding-top: 6mm; }
+    `;
+
+    const pages: string[] = [];
+
+    // Portada
+    const coverImg = imagesForSections[0];
+    pages.push(`
+      <div class="page cover">
+        ${STARS}
+        <div class="glow glow-center"></div>
+        <div class="glow glow-bottom"></div>
+        <div class="page-inner cover">
+          <p class="cover-title">${escapedDisplayTitle}</p>
+          <p class="cover-brand">✦ POPLI ✦</p>
+          ${coverImg ? `<div class="cover-image"><img src="${coverImg.dataUri}" alt="portada" /></div>` : ''}
+        </div>
+      </div>
+    `);
+
     if (!paragraphBlocks.length) {
-      const fallbackPage = `<div class="page"><p class="paragraph">CUENTO SIN CONTENIDO.</p></div>`;
-      return `<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8" />
-  <title>${escapedDisplayTitle}</title>
-  <style>
-    @page { size: A4; margin: 18mm 16mm; }
-    body { font-family: "Arial Rounded MT Bold", "Trebuchet MS", "Comic Sans MS", sans-serif; background: #fef9f3; color: #1b1b1f; padding: 0; margin: 0; }
-    main { padding: 18px 20px; }
-    h1 { font-size: 28px; margin-bottom: 12px; letter-spacing: 1px; text-transform: uppercase; }
-    .meta { color: #3f3f46; margin-bottom: 16px; font-size: 13px; letter-spacing: 0.6px; text-transform: uppercase; }
-    .paragraph { margin-bottom: 12px; line-height: 1.8; font-size: 18px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
-    .page { page-break-after: auto; padding-bottom: 18px; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>${escapedDisplayTitle}</h1>
-    ${meta ? `<p class="meta">${escapeHtml(toImprenta(`Meta: edad ${String(meta.age_range ?? '')} anos - habilidad ${String(meta.skill ?? '')} - tono ${String(meta.tone ?? '')}`))}</p>` : ''}
-    ${fallbackPage}
-  </main>
-</body>
-</html>`;
-    }
-
-    const totalSections = 3;
-    const totalParagraphs = paragraphBlocks.length;
-    const baseCount = Math.floor(totalParagraphs / totalSections);
-    const remainder = totalParagraphs % totalSections;
-    const sections: string[] = [];
-    let cursor = 0;
-
-    for (let i = 0; i < totalSections; i += 1) {
-      const take = baseCount + (i < remainder ? 1 : 0);
-      const slice = paragraphBlocks.slice(cursor, cursor + take);
-      cursor += take;
-      const textHtml = slice.length ? slice.join('\n') : '<p class="paragraph">SIN TEXTO.</p>';
-      const image = imagesForSections[i];
-      const imageHtml = image
-        ? `<img src="${image.dataUri}" alt="${image.label}" />`
-        : `<div class="image-placeholder">SIN IMAGEN</div>`;
-      const direction = i === 1 ? 'section reverse' : 'section';
-      sections.push(`
-        <section class="${direction}">
-          <div class="text-block">${textHtml}</div>
-          <div class="image-block">${imageHtml}</div>
-        </section>
+      pages.push(`
+        <div class="page story-page">
+          ${STARS}
+          <div class="page-inner"><p class="paragraph">CUENTO SIN CONTENIDO.</p></div>
+        </div>
       `);
+    } else {
+      const totalSections = 3;
+      const totalParagraphs = paragraphBlocks.length;
+      const baseCount = Math.floor(totalParagraphs / totalSections);
+      const remainder = totalParagraphs % totalSections;
+      let cursor = 0;
+
+      for (let i = 0; i < totalSections; i += 1) {
+        const take = baseCount + (i < remainder ? 1 : 0);
+        const slice = paragraphBlocks.slice(cursor, cursor + take);
+        cursor += take;
+        const textHtml = slice.length ? slice.join('\n') : '';
+        const img = imagesForSections[i];
+        const imageOnTop = i !== 1;
+        const imageBlock = img
+          ? `<div class="image-wrap${imageOnTop ? '' : ' image-wrap-bottom'}"><img src="${img.dataUri}" alt="${img.label}" /></div>`
+          : '';
+        pages.push(`
+          <div class="page story-page">
+            ${STARS}
+            <div class="glow glow-bottom"></div>
+            <div class="page-inner">
+              ${imageOnTop ? imageBlock : ''}
+              <div class="text-block">${textHtml}</div>
+              ${!imageOnTop ? imageBlock : ''}
+              <div class="page-num">${i + 1}</div>
+            </div>
+          </div>
+        `);
+      }
     }
-
-    const pageBlocks: string[] = [
-      `<div class="page">${sections.join('\n')}</div>`,
-    ];
-
-    const metaLine = meta
-      ? `<p class="meta">${escapeHtml(toImprenta(`Meta: edad ${String(meta.age_range ?? '')} anos - habilidad ${String(meta.skill ?? '')} - tono ${String(meta.tone ?? '')}`))}</p>`
-      : '';
-
-    const storyPagesHtml = pageBlocks.join('\n');
 
     return `<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
   <title>${escapedDisplayTitle}</title>
-  <style>
-    @page { size: A4; margin: 12mm 10mm; }
-    body { font-family: "Arial Rounded MT Bold", "Trebuchet MS", "Comic Sans MS", sans-serif; background: #fef9f3; color: #1b1b1f; padding: 0; margin: 0; }
-    main { padding: 10px 12px; max-width: 820px; margin: 0 auto; }
-    h1 { font-size: 28px; margin-bottom: 6px; letter-spacing: 1px; text-transform: uppercase; }
-    .meta { color: #3f3f46; margin-bottom: 10px; font-size: 13px; letter-spacing: 0.6px; text-transform: uppercase; }
-    .paragraph { margin-bottom: 6px; line-height: 1.5; font-size: 18px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
-    .page { page-break-after: auto; padding-bottom: 6px; display: block; }
-    .section { display: flex; gap: 12px; align-items: stretch; margin-bottom: 14px; }
-    .section.reverse { flex-direction: row-reverse; }
-    .text-block { flex: 1 1 55%; }
-    .image-block { flex: 1 1 45%; background: #0f4e69; border-radius: 12px; padding: 10px; display: flex; align-items: center; justify-content: center; border: 2px solid #0b3142; box-shadow: 0 8px 18px rgba(0,0,0,0.12); min-height: 210px; }
-    .image-block img { width: 100%; height: 100%; object-fit: contain; display: block; border-radius: 8px; }
-    .image-placeholder { color: #e6f4ff; font-size: 14px; font-weight: 700; letter-spacing: 1px; }
-  </style>
+  <style>${CSS}</style>
 </head>
 <body>
-  <main>
-    <h1>${escapedDisplayTitle}</h1>
-    ${metaLine}
-    ${storyPagesHtml}
-  </main>
+  ${pages.join('\n')}
 </body>
 </html>`;
   }, [paragraphs, planWithResults, theme, meta, storyText]);
@@ -989,10 +1031,6 @@ export default function MakerScreen() {
 
   const handleShare = React.useCallback(async () => {
     if (!storyText || exportingPdf) return;
-    if (!hasIllustrations) {
-      Alert.alert('Faltan ilustraciones', 'Primero toca "Ilustrar cuento" para generar las imagenes.');
-      return;
-    }
     try {
       const pdfUri = await exportStoryPdf();
       const baseTitle = theme?.trim() || DEFAULT_STORY_TITLE;
@@ -1018,10 +1056,6 @@ export default function MakerScreen() {
 
   const saveStory = React.useCallback(async () => {
     if (!storyText || exportingPdf) return;
-    if (!hasIllustrations) {
-      Alert.alert('Faltan ilustraciones', 'Genera las ilustraciones antes de guardar el cuento.');
-      return;
-    }
     if (Platform.OS === 'web') {
       try {
         await exportStoryPdf();
@@ -1238,7 +1272,6 @@ export default function MakerScreen() {
         skill,
         characters: characters || 'protagonista sin nombre y un amigo imaginario',
         locale,
-        tone,
         reading_time_minutes: minutes,
         story_language: storyLanguage,
         category: category || undefined,
@@ -1254,7 +1287,7 @@ export default function MakerScreen() {
     } catch (e: any) {
       Alert.alert('No se pudo generar', e?.message || 'Error desconocido');
     } finally { setLoading(false); }
-  }, [ageRange, theme, skill, characters, tone, locale, minutes, storyLanguage, category, genre]);
+  }, [ageRange, theme, skill, characters, locale, minutes, storyLanguage, category, genre]);
 
   const onIllustrate = React.useCallback(async () => {
     if (!storyText) { Alert.alert(t.alert_missing_story_title, t.alert_missing_story_msg); return; }
@@ -1277,7 +1310,6 @@ export default function MakerScreen() {
             theme: effectiveTheme,
             skill: skill || 'empatia',
             characters,
-            tone,
             locale,
             story: `${sceneContext}
 
@@ -1304,7 +1336,7 @@ ${storyText.slice(0, 900)}`,
     } catch (e: any) {
       Alert.alert('No se pudieron generar imagenes', e?.message || 'Error');
     } finally { setImgLoading(false); }
-  }, [storyText, ageRange, theme, skill, characters, tone, locale, illustrationPlan]);
+  }, [storyText, ageRange, theme, skill, characters, locale, illustrationPlan]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -1357,18 +1389,6 @@ ${storyText.slice(0, 900)}`,
 
             <Text style={{ color: THEME.textDim, marginBottom: 6 }}>{t.maker_characters_label}</Text>
             <TextInput placeholder={t.maker_characters_placeholder} placeholderTextColor="#8fa0c2" value={characters} onChangeText={setCharacters} style={{ color: THEME.text, borderColor: THEME.border, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12 }} />
-
-            {/* Tone chips */}
-            <View style={{ flexDirection: 'row', marginBottom: 12 }}>
-              {(['tierno', 'aventurero', 'humor'] as const).map((toneVal) => (
-                <Chip
-                  key={toneVal}
-                  label={(t as any)[`tone_${toneVal}`] || toneVal}
-                  selected={tone === toneVal}
-                  onPress={() => setTone(toneVal)}
-                />
-              ))}
-            </View>
 
             {/* Narrative category */}
             <Text style={{ color: THEME.textDim, marginBottom: 6 }}>{t.maker_category_label}</Text>
@@ -1478,7 +1498,7 @@ ${storyText.slice(0, 900)}`,
                 {meta && (
                   <View style={{ marginTop: 12 }}>
                     <Text style={{ color: THEME.textDim, fontSize: 12 }}>
-                      Meta: edad {meta.age_range} anos - habilidad {meta.skill} - tono {meta.tone}
+                      Meta: edad {meta.age_range} anos - habilidad {meta.skill}
                     </Text>
                   </View>
                 )}
@@ -1518,32 +1538,34 @@ ${storyText.slice(0, 900)}`,
                     </View>
                     {showVoiceList ? (
                       <View style={{ marginTop: 8, gap: 6 }}>
-                        {voiceList.map((v) => (
-                          <View key={v.id} style={{ paddingVertical: 8, paddingHorizontal: 8, borderWidth: 1, borderColor: THEME.border, borderRadius: 10, backgroundColor: voiceId === v.id ? 'rgba(159,210,255,0.08)' : 'transparent' }}>
-                            <Pressable
-                              onPress={() => {
-                                setVoiceId(v.id);
-                                saveVoicePreference(v.id).catch(() => {});
-                              }}
-                              style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}
-                            >
-                              <Feather
-                                name={voiceId === v.id ? 'check-circle' : 'circle'}
-                                size={18}
-                                color={voiceId === v.id ? THEME.accent : THEME.textDim}
-                              />
-                              <View style={{ marginLeft: 8, flex: 1, minWidth: 0 }}>
-                                <Text style={{ color: THEME.text, fontWeight: '700', flexShrink: 1 }}>{v.label}</Text>
-                                <Text style={{ color: THEME.textDim, fontSize: 12 }}>{v.description}</Text>
-                              </View>
-                              <Pressable onPress={() => handlePreviewVoice(v.id)} style={{ marginLeft: 8 }}>
-                                <Text style={{ color: THEME.accent }}>
-                                  {previewing === v.id ? t.settings_playing : 'Demo'}
-                                </Text>
+                        {voiceList.map((v) => {
+                          return (
+                            <View key={v.id} style={{ paddingVertical: 8, paddingHorizontal: 8, borderWidth: 1, borderColor: THEME.border, borderRadius: 10, backgroundColor: voiceId === v.id ? 'rgba(159,210,255,0.08)' : 'transparent' }}>
+                              <Pressable
+                                onPress={() => {
+                                  setVoiceId(v.id);
+                                  saveVoicePreference(v.id).catch(() => {});
+                                }}
+                                style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}
+                              >
+                                <Feather
+                                  name={voiceId === v.id ? 'check-circle' : 'circle'}
+                                  size={18}
+                                  color={voiceId === v.id ? THEME.accent : THEME.textDim}
+                                />
+                                <View style={{ marginLeft: 8, flex: 1, minWidth: 0 }}>
+                                  <Text style={{ color: THEME.text, fontWeight: '700', flexShrink: 1 }}>{v.label}</Text>
+                                  <Text style={{ color: THEME.textDim, fontSize: 12 }}>{v.description}</Text>
+                                </View>
+                                <Pressable onPress={() => handlePreviewVoice(v.id)} style={{ marginLeft: 8 }}>
+                                  <Text style={{ color: THEME.accent }}>
+                                    {previewing === v.id ? t.settings_playing : 'Demo'}
+                                  </Text>
+                                </Pressable>
                               </Pressable>
-                            </Pressable>
-                          </View>
-                        ))}
+                            </View>
+                          );
+                        })}
                       </View>
                     ) : null}
                   </View>
