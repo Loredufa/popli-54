@@ -1,15 +1,23 @@
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React from 'react';
-import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Audio } from 'expo-av';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../src/auth/AuthProvider';
 import Card from '../src/components/Card';
 import { THEME } from '../src/theme';
 import AppNavbar from '../src/components/AppNavbar';
 import { buildMenuItems } from '../src/constants/menu';
 import { fetchVoices, fetchVoicePreview, type VoiceOption } from '../src/lib/ttsClient';
-import { loadVoicePreference, saveVoicePreference } from '../src/lib/voicePrefs';
+import {
+  loadVoicePreference,
+  saveVoicePreference,
+  loadNamedVoices,
+  deleteNamedVoice,
+  MAX_NAMED_VOICES,
+  type NamedVoiceData,
+} from '../src/lib/voicePrefs';
 import { useLanguage } from '../src/i18n/LanguageContext';
 import { AppLocale } from '../src/i18n/translations';
 
@@ -29,7 +37,16 @@ export default function SettingsScreen() {
     const [selectedVoice, setSelectedVoice] = React.useState<string>('alloy');
     const [loadingVoices, setLoadingVoices] = React.useState(false);
     const [previewing, setPreviewing] = React.useState<string | null>(null);
+    const [namedVoices, setNamedVoices] = React.useState<NamedVoiceData[]>([]);
     const soundRef = React.useRef<Audio.Sound | null>(null);
+
+    useFocusEffect(
+      React.useCallback(() => {
+        let active = true;
+        loadNamedVoices().then((v) => { if (active) setNamedVoices(v); });
+        return () => { active = false; };
+      }, [])
+    );
 
     const handleLogout = async () => {
         try {
@@ -82,6 +99,38 @@ export default function SettingsScreen() {
         setPreviewing(null);
       }
     }, []);
+
+    const handlePreviewNamedVoice = React.useCallback(async (v: NamedVoiceData) => {
+      try {
+        setPreviewing(v.id);
+        if (soundRef.current) {
+          await soundRef.current.stopAsync().catch(() => {});
+          await soundRef.current.unloadAsync().catch(() => {});
+        }
+        const { sound } = await Audio.Sound.createAsync({ uri: v.localUri }, { shouldPlay: true });
+        soundRef.current = sound;
+      } catch (e) {
+        // ignore preview error
+      } finally {
+        setPreviewing(null);
+      }
+    }, []);
+
+    const handleDeleteNamedVoice = React.useCallback((v: NamedVoiceData) => {
+      Alert.alert('Borrar voz', `¿Borrar la voz "${v.label}"? No se puede deshacer.`, [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Borrar', style: 'destructive', onPress: async () => {
+            await deleteNamedVoice(v.id);
+            setNamedVoices((prev) => prev.filter((x) => x.id !== v.id));
+            if (selectedVoice === `custom:${v.id}`) {
+              setSelectedVoice('alloy');
+              await saveVoicePreference('alloy');
+            }
+          }
+        },
+      ]);
+    }, [selectedVoice]);
 
     return (
         <View style={{ flex: 1, backgroundColor: THEME.bgTop }}>
@@ -176,6 +225,35 @@ export default function SettingsScreen() {
                         </View>
                       </TouchableOpacity>
                     ))}
+
+                    <View style={{ height: 1, backgroundColor: THEME.border, marginVertical: 10 }} />
+                    <Text style={{ color: THEME.text, fontSize: 16, fontWeight: 'bold', marginBottom: 8 }}>
+                        Mis voces
+                    </Text>
+                    {namedVoices.map((v) => (
+                      <View key={v.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: THEME.border }}>
+                        <TouchableOpacity style={{ flex: 1 }} onPress={() => handleSelectVoice(`custom:${v.id}`)}>
+                          <Text style={{ color: THEME.text, fontWeight: '600' }}>
+                            🎙️ {v.label} {selectedVoice === `custom:${v.id}` ? '✓' : ''}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => handlePreviewNamedVoice(v)} style={{ marginRight: 12 }}>
+                          <Text style={{ color: THEME.text }}>
+                            {previewing === v.id ? t.settings_playing : t.settings_listen_demo}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => handleDeleteNamedVoice(v)}>
+                          <Feather name="trash-2" size={18} color="#ff8080" />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                    <TouchableOpacity
+                      disabled={namedVoices.length >= MAX_NAMED_VOICES}
+                      onPress={() => router.push('/record-voice')}
+                      style={{ paddingVertical: 12, opacity: namedVoices.length >= MAX_NAMED_VOICES ? 0.4 : 1 }}
+                    >
+                      <Text style={{ color: THEME.accent, fontWeight: '700' }}>+ Grabar nueva voz</Text>
+                    </TouchableOpacity>
 
                     <Text style={{ color: THEME.textDim, fontSize: 12, textAlign: 'center', marginTop: 20 }}>
                         {t.settings_version}

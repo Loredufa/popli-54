@@ -5,8 +5,19 @@ import { Platform } from 'react-native';
 import { apiUrl } from './api';
 
 const DEFAULT_TIMEOUT_MS = 45000;
+const CUSTOM_VOICE_TIMEOUT_MS = 120000; // cold starts de RunPod (carga del modelo) pueden tardar 30-90s+
 const BASE64_ENCODING =
   (FileSystem as any)?.EncodingType?.Base64 ?? 'base64';
+
+function extFromFormat(format: string | null): { ext: string; mime: string } {
+  if (format === 'wav') return { ext: 'wav', mime: 'audio/wav' };
+  return { ext: 'mp3', mime: 'audio/mpeg' };
+}
+
+async function readReferenceAudioB64(uri?: string | null): Promise<string | undefined> {
+  if (!uri) return undefined;
+  return FileSystem.readAsStringAsync(uri, { encoding: BASE64_ENCODING as FileSystem.EncodingType });
+}
 
 async function fetchWithTimeout(resource: RequestInfo | URL, options: RequestInit = {}, timeout = DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -67,8 +78,11 @@ export async function fetchNarrationTemp(opts: {
   storyText: string;
   voiceId: string;
   locale?: string;
+  referenceAudioUri?: string | null;
 }): Promise<string> {
   console.log('[TTS] narrate start', { len: opts.storyText?.length, voiceId: opts.voiceId, locale: opts.locale });
+  const referenceAudioB64 = await readReferenceAudioB64(opts.referenceAudioUri);
+  const timeout = referenceAudioB64 ? CUSTOM_VOICE_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
   const res = await fetchWithTimeout(apiUrl('/api/tts/narrate'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -76,20 +90,22 @@ export async function fetchNarrationTemp(opts: {
       story_text: opts.storyText,
       voice_id: opts.voiceId,
       locale: opts.locale || 'es-LATAM',
+      reference_audio_b64: referenceAudioB64,
     }),
-  });
+  }, timeout);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.error || `No se pudo generar la narracion (${res.status})`);
   }
+  const { ext, mime } = extFromFormat(res.headers.get('X-TTS-Format'));
   const buffer = Buffer.from(await res.arrayBuffer());
   const base64 = buffer.toString('base64');
   if (Platform.OS === 'web') {
-    const dataUri = `data:audio/mpeg;base64,${base64}`;
+    const dataUri = `data:${mime};base64,${base64}`;
     console.log('[TTS] narrate ready (web data uri)');
     return dataUri;
   }
-  const fileUri = `${FileSystem.cacheDirectory}narracion-temp-${Date.now()}.mp3`;
+  const fileUri = `${FileSystem.cacheDirectory}narracion-temp-${Date.now()}.${ext}`;
   await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: BASE64_ENCODING as FileSystem.EncodingType });
   console.log('[TTS] narrate ready', fileUri);
   return fileUri;
@@ -99,26 +115,31 @@ export async function downloadNarrationToGallery(opts: {
   storyText: string;
   voiceId: string;
   locale?: string;
+  referenceAudioUri?: string | null;
 }): Promise<NarrationResult> {
   const { status } = await MediaLibrary.requestPermissionsAsync();
   if (status !== 'granted') throw new Error('Permiso de galeria denegado');
 
-  const res = await fetch(apiUrl('/api/tts/narrate'), {
+  const referenceAudioB64 = await readReferenceAudioB64(opts.referenceAudioUri);
+  const timeout = referenceAudioB64 ? CUSTOM_VOICE_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+  const res = await fetchWithTimeout(apiUrl('/api/tts/narrate'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       story_text: opts.storyText,
       voice_id: opts.voiceId,
       locale: opts.locale || 'es-LATAM',
+      reference_audio_b64: referenceAudioB64,
     }),
-  });
+  }, timeout);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.error || 'No se pudo generar la narracion');
   }
+  const { ext } = extFromFormat(res.headers.get('X-TTS-Format'));
   const buffer = Buffer.from(await res.arrayBuffer());
   const base64 = buffer.toString('base64');
-  const fileUri = `${FileSystem.documentDirectory}narracion-${Date.now()}.mp3`;
+  const fileUri = `${FileSystem.documentDirectory}narracion-${Date.now()}.${ext}`;
   await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: BASE64_ENCODING as FileSystem.EncodingType });
   const assetUri = await MediaLibrary.saveToLibraryAsync(fileUri);
   return { fileUri, assetUri };

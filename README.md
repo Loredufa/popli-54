@@ -32,29 +32,37 @@ Hook `useMusicPlayer()` sobre `expo-av`:
 
 ## 🗣️ Narración de cuentos — `src/lib/ttsClient.ts`
 
-Cliente HTTP hacia `poplicuentos-api` (`/api/tts/*`). No genera audio localmente, todo el trabajo pasa por el backend (OpenAI):
+Cliente HTTP hacia `poplicuentos-api` (`/api/tts/*`). No genera audio localmente, todo el trabajo pasa por el backend (OpenAI para voces fijas, o el worker propio Chatterbox/RunPod para voces grabadas):
 
-- `fetchVoices()` — trae la lista de las 3 voces disponibles.
-- `fetchVoicePreview(voiceId)` — genera una muestra corta.
-- `fetchNarrationTemp(...)` — narra el cuento completo a un archivo temporal (usado por `StoryReader.tsx` al reproducir).
-- `downloadNarrationToGallery(...)` — guarda el audio narrado en la galería del dispositivo.
+- `fetchVoices()` — trae la lista de las 3 voces fijas.
+- `fetchVoicePreview(voiceId)` — genera una muestra corta (solo voces fijas).
+- `fetchNarrationTemp(...)` — narra el cuento completo a un archivo temporal (usado por `StoryReader.tsx` al reproducir). Acepta `referenceAudioUri` opcional para narrar con una voz grabada.
+- `downloadNarrationToGallery(...)` — guarda el audio narrado en la galería del dispositivo. Detecta MP3 vs WAV por el header `X-TTS-Format` de la respuesta.
 
-## 🎙️ Clonación de voz — sacada, se reconstruye desde cero
+## 🎙️ Grabar mi voz — `src/components/VoiceRecorder.tsx` + `src/lib/voicePrefs.ts`
 
-Hasta el 2026-07-10 existía acá un botón "Grabar mi voz" (`VoiceRecorder.tsx`) que clonaba la voz de un familiar usando **ElevenLabs**, un proveedor de nube de terceros agregado en una sesión de IA previa sin que fuera una decisión consciente del proyecto — y sin créditos de esa cuenta, fallaba en producción. Se sacó por completo porque viola la premisa de arquitectura de arriba: no mandar datos a la nube de un tercero.
+Mamá, papá o cualquier familiar puede grabar su voz, ponerle un nombre, y esa voz queda disponible en el menú de narración junto a las fijas.
 
-La feature se va a reconstruir **desde cero**, respetando esa premisa desde el diseño inicial (evaluar self-hosted vs. on-device, minimizar qué datos salen del teléfono) en vez de agregarla primero y evaluar la privacidad después.
+- **Motor**: self-hosted, worker propio (`poplicuentos-chatterbox-runpod`) desplegado en RunPod, no un proveedor de terceros — cumple la premisa de arquitectura de arriba.
+- **Grabación**: 20 a 60 segundos, leyendo un guion fijo (fonéticamente variado, no "hola hola hola") que se muestra en pantalla.
+- **Sin red al grabar**: a diferencia de la versión vieja con ElevenLabs (que subía la muestra para "clonar" en la nube de un tercero), acá la grabación se copia a almacenamiento durable del dispositivo (`FileSystem.documentDirectory`) y listo — Chatterbox es zero-shot, no hace falta crear nada del lado del servidor. La red solo se usa en cada narración, transitoriamente (igual que ya pasa hoy con las voces fijas de OpenAI).
+- **Multi-voz**: hasta **3** voces guardadas a la vez (`MAX_NAMED_VOICES` en `voicePrefs.ts`), cada una con nombre propio, todas seleccionables juntas.
+- **Dónde se gestiona**: grabar desde `maker.tsx` (sección "Narrador") o desde Ajustes → "Mis voces"; borrar solo desde Ajustes → "Mis voces" (acción destructiva, separada del flujo creativo).
+- **Formato**: Chatterbox devuelve WAV (no MP3) — el cliente elige la extensión/mime dinámicamente según el header `X-TTS-Format`.
+
+Historia: hasta el 2026-07-10 esta feature usaba ElevenLabs, un proveedor de terceros agregado sin decisión consciente del proyecto y sin créditos configurados — se sacó por completo y se reconstruyó desde cero con el enfoque self-hosted descripto arriba.
 
 ## Estructura relevante
 
 ```
-app/                    rutas (Expo Router): tabs, story/[id], maker, settings, login...
+app/                    rutas (Expo Router): tabs, story/[id], maker, settings, record-voice (modal), login...
 src/
   lib/
     musicPlayer.ts       música de fondo
-    ttsClient.ts          cliente TTS hacia la API
-    voicePrefs.ts         preferencia de voz guardada en el dispositivo
+    ttsClient.ts          cliente TTS hacia la API (voces fijas + grabadas)
+    voicePrefs.ts         preferencia de voz + voces nombradas guardadas en el dispositivo
   components/
     MusicBar.tsx          UI de música
     StoryReader.tsx        pantalla de lectura (une música + narración)
+    VoiceRecorder.tsx      grabación de voz familiar (nombre, guion, 20-60s)
 ```

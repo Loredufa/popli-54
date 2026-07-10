@@ -21,7 +21,7 @@ import MusicBar from '../src/components/MusicBar';
 import { useMusicPlayer } from '../src/lib/musicPlayer';
 import { downloadNarrationToGallery, fetchVoices, fetchVoicePreview, type VoiceOption } from '../src/lib/ttsClient';
 import { saveCurrentSession, loadCurrentSession, StorySession, clearCurrentSession } from '../src/lib/storage';
-import { loadVoicePreference, saveVoicePreference } from '../src/lib/voicePrefs';
+import { loadVoicePreference, saveVoicePreference, loadNamedVoices, type NamedVoiceData } from '../src/lib/voicePrefs';
 
 /* ---------------- THEME ---------------- */
 const THEME = {
@@ -581,6 +581,7 @@ export default function MakerScreen() {
   const [exportingPdf, setExportingPdf] = React.useState(false);
   const [previewing, setPreviewing] = React.useState<string | null>(null);
   const [showVoiceList, setShowVoiceList] = React.useState(true);
+  const [namedVoices, setNamedVoices] = React.useState<NamedVoiceData[]>([]);
   const previewSoundRef = React.useRef<any>(null);
   const previewObjectUrlRef = React.useRef<string | null>(null);
 
@@ -644,6 +645,12 @@ export default function MakerScreen() {
       } finally {
         if (alive) setLoadingVoices(false);
       }
+      try {
+        const named = await loadNamedVoices();
+        if (alive) setNamedVoices(named);
+      } catch {
+        // ignore
+      }
       const session = await loadCurrentSession();
       if (alive && session?.story) {
         setStoryText(session.story);
@@ -674,8 +681,8 @@ export default function MakerScreen() {
         const pref = await loadVoicePreference();
         if (active && pref) setVoiceId(pref);
         try {
-          const list = await fetchVoices();
-          if (active) setVoices(list);
+          const [list, named] = await Promise.all([fetchVoices(), loadNamedVoices()]);
+          if (active) { setVoices(list); setNamedVoices(named); }
         } catch {
           // ignore
         }
@@ -692,17 +699,34 @@ export default function MakerScreen() {
   }, [user]);
 
   const canGenerate = !!ageRange && !!theme && !!skill && !loading;
-  const voiceLabel = React.useMemo(() => {
-    return VOICE_LABELS[voiceId] || voiceId;
-  }, [voiceId]);
 
-  const voiceList = React.useMemo<VoiceOption[]>(() => {
-    return voices.length ? voices : [
+  const voiceList = React.useMemo<(VoiceOption & { isCustom?: boolean; referenceAudioUri?: string })[]>(() => {
+    const fixed: VoiceOption[] = voices.length ? voices : [
       { id: 'shimmer', label: 'Voz tierna (Shimmer)', description: 'Dulce y amable', idealFor: '', timbre: '' },
       { id: 'nova', label: 'Voz aventura (Nova)', description: 'Expresiva y dinamica', idealFor: '', timbre: '' },
       { id: 'alloy', label: 'Voz calida (Alloy)', description: 'Narrador neutro y cercano', idealFor: '', timbre: '' },
     ];
-  }, [voices]);
+    const custom = namedVoices.map((v) => ({
+      id: `custom:${v.id}`,
+      label: `🎙️ ${v.label}`,
+      description: 'Voz grabada por vos',
+      idealFor: 'Narración con tu propia voz o la de un familiar',
+      timbre: '',
+      isCustom: true,
+      referenceAudioUri: v.localUri,
+    }));
+    return [...fixed, ...custom];
+  }, [voices, namedVoices]);
+
+  const selectedVoiceEntry = React.useMemo(
+    () => voiceList.find((v) => v.id === voiceId) || null,
+    [voiceList, voiceId]
+  );
+
+  const voiceLabel = React.useMemo(() => {
+    return VOICE_LABELS[voiceId] || selectedVoiceEntry?.label || voiceId;
+  }, [voiceId, selectedVoiceEntry]);
+
   const currentAudioUri = audioMap[voiceId] || null;
 
   const skillsContent = React.useMemo(() => (
@@ -1186,6 +1210,7 @@ export default function MakerScreen() {
         storyText,
         voiceId: currentVoiceId,
         locale: 'es-LATAM',
+        referenceAudioUri: selectedVoiceEntry?.referenceAudioUri,
       });
       const uri = res.assetUri || res.fileUri;
       setAudioMap((prev) => ({ ...prev, [currentVoiceId]: uri }));
@@ -1195,7 +1220,7 @@ export default function MakerScreen() {
     } finally {
       setAudioLoading(false);
     }
-  }, [storyText, voiceId]);
+  }, [storyText, voiceId, selectedVoiceEntry]);
 
   const handleShareAudio = React.useCallback(async () => {
     if (Platform.OS === 'web') {
@@ -1210,8 +1235,9 @@ export default function MakerScreen() {
     try {
       const canShare = await Sharing.isAvailableAsync();
       const dialogTitle = `${(theme || 'Cuento')} ${BRAND_SUFFIX}`;
+      const mimeType = uri.toLowerCase().endsWith('.wav') ? 'audio/wav' : 'audio/mpeg';
       if (canShare) {
-        await Sharing.shareAsync(uri, { mimeType: 'audio/mpeg', dialogTitle });
+        await Sharing.shareAsync(uri, { mimeType, dialogTitle });
       } else {
         await Share.share({ message: dialogTitle });
       }
@@ -1223,8 +1249,9 @@ export default function MakerScreen() {
   const handlePreviewVoice = React.useCallback(async (id: string) => {
     try {
       setPreviewing(id);
-      const uri = await fetchVoicePreview(id);
+      const customEntry = voiceList.find((v) => v.id === id && v.isCustom);
       const { Audio } = await import('expo-av');
+      const uri = customEntry?.referenceAudioUri || (await fetchVoicePreview(id));
       if (previewSoundRef.current) {
         await previewSoundRef.current.stopAsync().catch(() => {});
         await previewSoundRef.current.unloadAsync().catch(() => {});
@@ -1255,7 +1282,7 @@ export default function MakerScreen() {
       Alert.alert('No se pudo reproducir la voz', e?.message || 'Intentalo de nuevo.');
       setPreviewing(null);
     }
-  }, []);
+  }, [voiceList]);
 
   const onGenerate = React.useCallback(async () => {
     setLoading(true);
@@ -1521,6 +1548,7 @@ ${storyText.slice(0, 900)}`,
                 locale={ageRange === '6-10' ? 'es-AR' : 'es-AR'}
                 voiceLabel={voiceLabel}
                 voiceId={voiceId}
+                referenceAudioUri={selectedVoiceEntry?.referenceAudioUri}
                 audioUri={currentAudioUri}
                 onNarrationReady={(voice, uri) => setAudioMap((prev) => ({ ...prev, [voice]: uri }))}
                 onChooseNarrator={() => setShowVoiceList((v) => !v)}
@@ -1529,6 +1557,13 @@ ${storyText.slice(0, 900)}`,
               />
               <View style={{ marginTop: 12, padding: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: THEME.border }}>
                 <Text style={{ color: THEME.text, fontWeight: '700', marginBottom: 8 }}>Narrador</Text>
+                <Pressable
+                  onPress={() => router.push('/record-voice')}
+                  style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}
+                >
+                  <Feather name="mic" size={18} color={THEME.accent} />
+                  <Text style={{ color: THEME.accent, marginLeft: 6, fontWeight: '700' }}>Grabar mi voz</Text>
+                </Pressable>
                 {loadingVoices ? (
                   <Text style={{ color: THEME.textDim }}>{t.settings_loading_voices}</Text>
                 ) : (

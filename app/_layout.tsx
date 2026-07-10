@@ -13,6 +13,7 @@ export default function RootLayout() {
           <Stack.Screen name="register" options={{ presentation: 'card', headerShown: false }} />
           {/* Tu modal: si querés que sea modal real */}
           <Stack.Screen name="modal" options={{ presentation: 'modal', headerShown: false }} />
+          <Stack.Screen name="record-voice" options={{ presentation: 'modal', headerShown: false }} />
         </Stack>
       </AuthProvider>
     </LanguageProvider>

@@ -27,7 +27,8 @@ type Props = {
   text: string;
   locale?: string; // ej. 'es-AR'
   voiceLabel?: string;
-  voiceId?: string; // alloy | nova | shimmer
+  voiceId?: string; // alloy | nova | shimmer | custom:<id>
+  referenceAudioUri?: string | null; // grabación local para voces custom
   onChooseNarrator?: () => void;
   onNarrationStart?: () => void;
   onNarrationStop?: () => void;
@@ -40,6 +41,7 @@ export default function StoryReader({
   locale = 'es-AR',
   voiceLabel,
   voiceId,
+  referenceAudioUri,
   onChooseNarrator,
   onNarrationStart,
   onNarrationStop,
@@ -84,7 +86,7 @@ export default function StoryReader({
       if (!uri) {
         console.log('[StoryReader] play -> fetchNarrationTemp');
         const vid = voiceId || 'shimmer';
-        uri = await fetchNarrationTemp({ storyText: text, voiceId: vid, locale });
+        uri = await fetchNarrationTemp({ storyText: text, voiceId: vid, locale, referenceAudioUri });
         onNarrationReady?.(vid, uri);
       }
 
@@ -140,7 +142,7 @@ export default function StoryReader({
     } finally {
       setLoadingAudio(false);
     }
-  }, [text, voiceId, locale, onNarrationStart, onNarrationStop]);
+  }, [text, voiceId, locale, referenceAudioUri, onNarrationStart, onNarrationStop]);
 
   const onPause = React.useCallback(async () => {
     if (!soundRef.current) return;
