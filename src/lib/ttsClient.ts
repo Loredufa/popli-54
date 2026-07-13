@@ -5,7 +5,11 @@ import { Platform } from 'react-native';
 import { apiUrl } from './api';
 
 const DEFAULT_TIMEOUT_MS = 45000;
-const CUSTOM_VOICE_TIMEOUT_MS = 120000; // cold starts de RunPod (carga del modelo) pueden tardar 30-90s+
+// El backend puede esperar hasta ~210s (90s de wait inicial + 120s de polling,
+// ver RUNPOD_POLL_BUDGET_MS en poplicuentos-api/lib/tts.ts) antes de darse por
+// vencido con RunPod. Este timeout tiene que ser mayor a eso, si no la app
+// aborta la conexión antes de que el backend termine de esperar su propia respuesta.
+const CUSTOM_VOICE_TIMEOUT_MS = 240000;
 const BASE64_ENCODING =
   (FileSystem as any)?.EncodingType?.Base64 ?? 'base64';
 
