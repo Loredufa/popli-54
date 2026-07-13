@@ -1,10 +1,10 @@
 {
   "expo": {
     "name": "poplicuentos",
-    "slug": "poplicuentos",
+    "slug": "popli-54",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/logo.png",
+    "icon": "./assets/images/icon.png",
     "scheme": "poplicuentos",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -13,9 +13,9 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/logo.png",
-        "monochromeImage": "./assets/images/logo.png"
+        "backgroundColor": "#1E1B4B",
+        "foregroundImage": "./assets/images/icon.png",
+        "monochromeImage": "./assets/images/icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -31,11 +31,11 @@
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
+          "imageWidth": 240,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#1E1B4B",
           "dark": {
-            "backgroundColor": "#000000"
+            "backgroundColor": "#1E1B4B"
           }
         }
       ]
