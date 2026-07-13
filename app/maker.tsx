@@ -197,7 +197,7 @@ async function callIllustrations(payload: {
   beats?: Array<{ slot: IllustrationSlot; label: string; excerpt: string; order: number }>;
   count?: number;
 }): Promise<string[]> {
-  const { images } = await fetchJSON<{ images?: string[] }>('/api/illustrate-gemini', {
+  const { images } = await fetchJSON<{ images?: string[] }>('/api/illustrate', {
     ...payload,
     num_images: payload.count ?? 3,
   }, { allowProxy: true });
