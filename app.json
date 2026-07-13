@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "popli-54",
-    "slug": "popli-54",
+    "name": "poplicuentos",
+    "slug": "poplicuentos",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/logo.png",
-    "scheme": "popli54",
+    "scheme": "poplicuentos",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -19,7 +19,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.loredufa.popli54"
+      "package": "com.loredufa.poplicuentos"
     },
     "web": {
       "output": "static",
