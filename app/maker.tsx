@@ -6,34 +6,23 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { router, type Href } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as React from 'react';
 import {
   ActivityIndicator, Alert, Image, Pressable, ScrollView, Share, Text, TextInput, View, Platform,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useAuth } from '../src/auth/AuthProvider';
 import AppNavbar, { type NavbarMenuItem } from '../src/components/AppNavbar';
-import StoryReader from '../src/components/StoryReader';
-import MusicBar from '../src/components/MusicBar';
-import { useMusicPlayer } from '../src/lib/musicPlayer';
-import { downloadNarrationToGallery, fetchVoices, fetchVoicePreview, type VoiceOption } from '../src/lib/ttsClient';
-import { saveCurrentSession, loadCurrentSession, StorySession, clearCurrentSession } from '../src/lib/storage';
-import { loadVoicePreference, saveVoicePreference, loadNamedVoices, type NamedVoiceData } from '../src/lib/voicePrefs';
+import { clearCurrentSession } from '../src/lib/storage';
+import { useStory } from '../src/story/StoryContext';
+import { CardBox, GradientBG, THEME } from '../src/ui/theme';
+import type {
+  IllustrationSlot, IllustrationPlan, IllustrationResult,
+  IllustrationApiScene, IllustrationApiPlan,
+} from '../src/story/types';
+import { sceneKeyForSlot } from '../src/story/types';
+import { buildIllustrationPlan, splitStoryParagraphs } from '../src/story/plan';
 
-/* ---------------- THEME ---------------- */
-const THEME = {
-  bgTop: '#0e1630',
-  bgBottom: '#1b2a4a',
-  card: 'rgba(255,255,255,0.06)',
-  border: 'rgba(255,255,255,0.12)',
-  text: '#e7eefc',
-  textDim: '#b5c3e6',
-  primary: '#5aa0ff',
-  accent: '#9fd2ff',
-};
 const HOME_ROUTE = '/(tabs)/index' as Href;
 const LOGIN_ROUTE = '/login' as Href;
 import { buildMenuItems } from '../src/constants/menu';
@@ -78,12 +67,6 @@ const GENRE_OPTIONS: { value: string; tKey: string }[] = [
   { value: 'ciencia_ficcion', tKey: 'genre_ciencia_ficcion' },
   { value: 'fantasia', tKey: 'genre_fantasia' },
 ];
-
-const VOICE_LABELS: Record<string, string> = {
-  shimmer: 'Voz tierna (Shimmer)',
-  nova: 'Voz aventura (Nova)',
-  alloy: 'Voz calida (Alloy)',
-};
 
 /* ---------------- HELPERS ---------------- */
 function extractJsonBlock(text: string) {
@@ -179,36 +162,21 @@ async function callBackend(payload: any): Promise<string> {
   const { content } = await fetchJSON<{ content?: string }>('/api/story', payload, { allowProxy: true });
   return (content || '').trim();
 }
-type IllustrationSlot = 'intro' | 'conflict' | 'resolution';
-type IllustrationPlacement = 'before' | 'after';
-type IllustrationPlan = {
-  slot: IllustrationSlot;
-  label: string;
-  paragraphIndex: number;
-  placement: IllustrationPlacement;
-  excerpt: string;
-};
-type IllustrationResult = IllustrationPlan & {
-  uri?: string | null;
-};
-
 async function callIllustrations(payload: {
   age_range: '2-5' | '6-10'; theme: string; skill: string; characters?: string; tone?: string; locale?: string; story?: string;
   beats?: Array<{ slot: IllustrationSlot; label: string; excerpt: string; order: number }>;
   count?: number;
-}): Promise<string[]> {
-  const { images } = await fetchJSON<{ images?: string[] }>('/api/illustrate', {
+  scene_index?: IllustrationApiScene;
+  plan?: IllustrationApiPlan;
+  synopsis?: string;
+}): Promise<{ images: string[]; plan: IllustrationApiPlan | null; synopsis: string | null }> {
+  const { images, plan, synopsis } = await fetchJSON<{ images?: string[]; plan?: IllustrationApiPlan | null; synopsis?: string | null }>('/api/illustrate', {
     ...payload,
     num_images: payload.count ?? 3,
   }, { allowProxy: true });
-  return Array.isArray(images) ? images : [];
+  return { images: Array.isArray(images) ? images : [], plan: plan ?? null, synopsis: synopsis ?? null };
 }
 
-const ILLUSTRATION_CAPTIONS: Record<IllustrationSlot, string> = {
-  intro: 'Presentacion de los personajes',
-  conflict: 'Conflicto en desarrollo',
-  resolution: 'Resolucion del cuento',
-};
 
 function escapeHtml(value: string) {
   return value
@@ -459,75 +427,19 @@ async function normalizeStoredIndexItem(raw: any): Promise<SavedStoryIndexItem |
   };
 }
 
-function splitStoryParagraphs(story: string): string[] {
-  return story
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-}
-
-function buildIllustrationPlan(story: string): IllustrationPlan[] {
-  const paragraphs = splitStoryParagraphs(story);
-  const fallbackExcerpt = story.trim() || 'Cuento sin texto';
-  if (!paragraphs.length) {
-    return [
-      { slot: 'intro', label: ILLUSTRATION_CAPTIONS.intro, paragraphIndex: 0, placement: 'after', excerpt: fallbackExcerpt },
-      { slot: 'conflict', label: ILLUSTRATION_CAPTIONS.conflict, paragraphIndex: 0, placement: 'after', excerpt: fallbackExcerpt },
-      { slot: 'resolution', label: ILLUSTRATION_CAPTIONS.resolution, paragraphIndex: 0, placement: 'before', excerpt: fallbackExcerpt },
-    ];
-  }
-
-  const firstIndex = 0;
-  const lastIndex = Math.max(paragraphs.length - 1, 0);
-  const middleIndex = paragraphs.length === 1
-    ? 0
-    : paragraphs.length === 2
-      ? 1
-      : Math.max(1, Math.floor(paragraphs.length / 2));
-
-  return [
-    {
-      slot: 'intro',
-      label: ILLUSTRATION_CAPTIONS.intro,
-      paragraphIndex: firstIndex,
-      placement: 'after',
-      excerpt: paragraphs[firstIndex] ?? fallbackExcerpt,
-    },
-    {
-      slot: 'conflict',
-      label: ILLUSTRATION_CAPTIONS.conflict,
-      paragraphIndex: middleIndex,
-      placement: 'after',
-      excerpt: paragraphs[middleIndex] ?? paragraphs[lastIndex] ?? fallbackExcerpt,
-    },
-    {
-      slot: 'resolution',
-      label: ILLUSTRATION_CAPTIONS.resolution,
-      paragraphIndex: lastIndex,
-      placement: paragraphs.length === 1 ? 'after' : 'before',
-      excerpt: paragraphs[lastIndex] ?? fallbackExcerpt,
-    },
-  ];
+function mergeIllustrationResult(
+  prev: IllustrationResult[],
+  plan: IllustrationPlan[],
+  slot: IllustrationSlot,
+  uri: string | null,
+): IllustrationResult[] {
+  const bySlot = new Map(prev.map((item) => [item.slot, item] as const));
+  const scene = plan.find((s) => s.slot === slot);
+  if (scene) bySlot.set(slot, { ...scene, uri });
+  return plan.map((s) => bySlot.get(s.slot) ?? { ...s, uri: null });
 }
 
 /* --------------- UI PRIMITIVES --------------- */
-const GradientBG: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <View style={{ flex: 1 }}>
-    <LinearGradient colors={[THEME.bgTop, THEME.bgBottom]} style={{ position: 'absolute', inset: 0 }} />
-    <View style={{ position: 'absolute', inset: 0 }}>
-      {[...Array(20)].map((_, i) => (
-        <View key={i} style={{ position: 'absolute', top: Math.random() * 700, left: Math.random() * 360, width: 2, height: 2, backgroundColor: THEME.accent, borderRadius: 2, opacity: 0.9 }} />
-      ))}
-    </View>
-    {children}
-  </View>
-);
-const CardBox: React.FC<{ title?: string; children: React.ReactNode; style?: any }> = ({ title, children, style }) => (
-  <Animated.View entering={FadeInUp.duration(600)} style={[{ backgroundColor: THEME.card, borderColor: THEME.border, borderWidth: 1, borderRadius: 16, padding: 14 }, style]}>
-    {!!title && <Text style={{ color: THEME.text, fontSize: 16, fontWeight: '600', marginBottom: 8 }}>{title}</Text>}
-    {children}
-  </Animated.View>
-);
 const Chip: React.FC<{ label: string; selected?: boolean; onPress?: () => void }> = ({ label, selected, onPress }) => (
   <Pressable onPress={onPress} style={({ pressed }) => ({
     opacity: pressed ? 0.7 : 1, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1,
@@ -553,8 +465,12 @@ export default function MakerScreen() {
   const { user, logout, loading: authLoading } = useAuth();
   const { t, appLocale } = useLanguage();
   const menuItems = buildMenuItems(t);
+  const {
+    storyText, setStoryText, meta, setMeta, theme, setTheme,
+    illustrationPlan, setIllustrationPlan, illustrations, setIllustrations,
+    setAudioMap, clearStory,
+  } = useStory();
   const [ageRange, setAgeRange] = React.useState<'2-5' | '6-10' | ''>('');
-  const [theme, setTheme] = React.useState('');
   const [skill, setSkill] = React.useState('');
   const [characters, setCharacters] = React.useState('');
   const [locale] = React.useState<'es-AR' | 'es-LATAM'>('es-LATAM');
@@ -565,45 +481,14 @@ export default function MakerScreen() {
   const hasOverriddenStoryLanguage = React.useRef(false);
 
   const [loading, setLoading] = React.useState(false);
-  const [storyText, setStoryText] = React.useState('');
-  const [meta, setMeta] = React.useState<any>(null);
-  const [imgLoading, setImgLoading] = React.useState(false);
-  const [illustrationPlan, setIllustrationPlan] = React.useState<IllustrationPlan[]>([]);
-  const [illustrations, setIllustrations] = React.useState<IllustrationResult[]>([]);
+  const [illustrationLoading, setIllustrationLoading] = React.useState<Record<IllustrationSlot, boolean>>({
+    intro: false, conflict: false, resolution: false,
+  });
+  // Derivado (no state propio) para que el botón "Ilustrar" no se reactive hasta que las 3 escenas terminen.
+  const imgLoading = illustrationLoading.intro || illustrationLoading.conflict || illustrationLoading.resolution;
   const speakingRef = React.useRef(false);
   const [loggingOut, setLoggingOut] = React.useState(false);
-  const music = useMusicPlayer();
-  const [voiceId, setVoiceId] = React.useState<string>('shimmer');
-  const [audioMap, setAudioMap] = React.useState<Record<string, string>>({});
-  const [audioLoading, setAudioLoading] = React.useState(false);
-  const [voices, setVoices] = React.useState<VoiceOption[]>([]);
-  const [loadingVoices, setLoadingVoices] = React.useState(false);
   const [exportingPdf, setExportingPdf] = React.useState(false);
-  const [previewing, setPreviewing] = React.useState<string | null>(null);
-  const [showVoiceList, setShowVoiceList] = React.useState(true);
-  const [namedVoices, setNamedVoices] = React.useState<NamedVoiceData[]>([]);
-  const previewSoundRef = React.useRef<any>(null);
-  const previewObjectUrlRef = React.useRef<string | null>(null);
-
-  const sanitizeAudioMap = React.useCallback((map: Record<string, string> = {}) => {
-    const cleaned: Record<string, string> = {};
-    Object.entries(map).forEach(([k, v]) => {
-      if (typeof v === 'string' && !v.startsWith('blob:') && v.trim()) {
-        cleaned[k] = v;
-      }
-    });
-    return cleaned;
-  }, []);
-  React.useEffect(() => {
-    return () => {
-      if (previewSoundRef.current) {
-        previewSoundRef.current.unloadAsync?.().catch(() => {});
-      }
-      if (previewObjectUrlRef.current && Platform.OS === 'web') {
-        URL.revokeObjectURL(previewObjectUrlRef.current);
-      }
-    };
-  }, []);
 
   React.useEffect(() => {
     if (!authLoading && !user) {
@@ -623,74 +508,6 @@ export default function MakerScreen() {
     if (ageRange !== '6-10') setGenre('');
   }, [ageRange]);
 
-  React.useEffect(() => {
-    let alive = true;
-    (async () => {
-      const pref = await loadVoicePreference();
-      if (alive && pref) setVoiceId(pref);
-      setLoadingVoices(true);
-      try {
-        const list = await fetchVoices();
-        if (alive) {
-          const finalList = list.length >= 3 ? list : [
-            { id: 'shimmer', label: 'Voz tierna (Shimmer)', description: 'Dulce y amable', idealFor: '', timbre: '' },
-            { id: 'nova', label: 'Voz aventura (Nova)', description: 'Expresiva y dinamica', idealFor: '', timbre: '' },
-            { id: 'alloy', label: 'Voz calida (Alloy)', description: 'Narrador neutro y cercano', idealFor: '', timbre: '' },
-          ];
-          setVoices(finalList);
-          if (!pref && finalList[0]) setVoiceId(finalList[0].id);
-        }
-      } catch {
-        // ignore
-      } finally {
-        if (alive) setLoadingVoices(false);
-      }
-      try {
-        const named = await loadNamedVoices();
-        if (alive) setNamedVoices(named);
-      } catch {
-        // ignore
-      }
-      const session = await loadCurrentSession();
-      if (alive && session?.story) {
-        setStoryText(session.story);
-        if (session.meta) setMeta(session.meta);
-        if (session.voiceId) setVoiceId(session.voiceId);
-        if (session.audioMap) setAudioMap(sanitizeAudioMap(session.audioMap));
-        else if (session.audioUri && session.voiceId) {
-          const cleaned = sanitizeAudioMap({ [session.voiceId]: session.audioUri });
-          setAudioMap(cleaned);
-        }
-        const plan = buildIllustrationPlan(session.story);
-        setIllustrationPlan(plan);
-        const imgs = session.images || [];
-        const results = plan.map((item, idx) => ({
-          ...item,
-          uri: imgs[idx] ?? null,
-        }));
-        setIllustrations(results);
-      }
-    })();
-    return () => { alive = false; };
-  }, []);
-
-  useFocusEffect(
-    React.useCallback(() => {
-      let active = true;
-      (async () => {
-        const pref = await loadVoicePreference();
-        if (active && pref) setVoiceId(pref);
-        try {
-          const [list, named] = await Promise.all([fetchVoices(), loadNamedVoices()]);
-          if (active) { setVoices(list); setNamedVoices(named); }
-        } catch {
-          // ignore
-        }
-      })();
-      return () => { active = false; };
-    }, [])
-  );
-
   const greetingName = React.useMemo(() => {
     if (!user) return '';
     const base = (user.first_name || user.email || '').trim();
@@ -699,35 +516,6 @@ export default function MakerScreen() {
   }, [user]);
 
   const canGenerate = !!ageRange && !!theme && !!skill && !loading;
-
-  const voiceList = React.useMemo<(VoiceOption & { isCustom?: boolean; referenceAudioUri?: string })[]>(() => {
-    const fixed: VoiceOption[] = voices.length ? voices : [
-      { id: 'shimmer', label: 'Voz tierna (Shimmer)', description: 'Dulce y amable', idealFor: '', timbre: '' },
-      { id: 'nova', label: 'Voz aventura (Nova)', description: 'Expresiva y dinamica', idealFor: '', timbre: '' },
-      { id: 'alloy', label: 'Voz calida (Alloy)', description: 'Narrador neutro y cercano', idealFor: '', timbre: '' },
-    ];
-    const custom = namedVoices.map((v) => ({
-      id: `custom:${v.id}`,
-      label: `🎙️ ${v.label}`,
-      description: 'Voz grabada por vos',
-      idealFor: 'Narración con tu propia voz o la de un familiar',
-      timbre: '',
-      isCustom: true,
-      referenceAudioUri: v.localUri,
-    }));
-    return [...fixed, ...custom];
-  }, [voices, namedVoices]);
-
-  const selectedVoiceEntry = React.useMemo(
-    () => voiceList.find((v) => v.id === voiceId) || null,
-    [voiceList, voiceId]
-  );
-
-  const voiceLabel = React.useMemo(() => {
-    return VOICE_LABELS[voiceId] || selectedVoiceEntry?.label || voiceId;
-  }, [voiceId, selectedVoiceEntry]);
-
-  const currentAudioUri = audioMap[voiceId] || null;
 
   const skillsContent = React.useMemo(() => (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
@@ -762,21 +550,6 @@ export default function MakerScreen() {
     return groups;
   }, [planWithResults]);
 
-  React.useEffect(() => {
-    if (!storyText?.trim()) return;
-    const session: StorySession = {
-      id: 'current',
-      story: storyText,
-      title: theme,
-      images: illustrations.map((item) => item.uri).filter(Boolean) as string[],
-      voiceId,
-      audioMap: Object.keys(audioMap).length ? audioMap : undefined,
-      meta,
-      createdAt: new Date().toISOString(),
-    };
-    saveCurrentSession(session).catch(() => {});
-  }, [storyText, illustrations, voiceId, audioMap, meta, theme]);
-
   const hasIllustrations = React.useMemo(
     () => planWithResults.some((item) => Boolean(item.uri)),
     [planWithResults],
@@ -793,16 +566,17 @@ export default function MakerScreen() {
 
   const renderIllustrationItem = (item: IllustrationResult, key: string) => {
     if (!item.uri) {
+      const isSceneLoading = illustrationLoading[item.slot];
       return (
         <View key={key} style={{ marginVertical: 12 }}>
           <View style={{ borderWidth: 1, borderColor: THEME.border, borderRadius: 14, padding: 16, alignItems: 'center', backgroundColor: 'rgba(11,18,38,0.3)' }}>
-            {imgLoading ? (
+            {isSceneLoading ? (
               <ActivityIndicator color={THEME.accent} style={{ marginBottom: 8 }} />
             ) : (
               <Feather name='image' size={24} color={THEME.accent} style={{ marginBottom: 8 }} />
             )}
             <Text style={{ color: THEME.textDim, textAlign: 'center' }}>
-              {imgLoading ? 'Generando ilustracion...' : `Ilustracion pendiente: ${item.label}`}
+              {isSceneLoading ? 'Generando ilustracion...' : `Ilustracion pendiente: ${item.label}`}
             </Text>
           </View>
         </View>
@@ -1044,6 +818,7 @@ export default function MakerScreen() {
     setLoggingOut(true);
     try {
       await clearCurrentSession();
+      clearStory();
       await logout();
       router.replace(LOGIN_ROUTE);
     } catch (e: any) {
@@ -1051,7 +826,7 @@ export default function MakerScreen() {
     } finally {
       setLoggingOut(false);
     }
-  }, [logout, loggingOut]);
+  }, [logout, loggingOut, clearStory]);
 
   const handleShare = React.useCallback(async () => {
     if (!storyText || exportingPdf) return;
@@ -1193,97 +968,6 @@ export default function MakerScreen() {
     }
   }, [storyText, meta, illustrations, exportStoryPdf, hasIllustrations, theme]);
 
-  const handleNarrationDownload = React.useCallback(async () => {
-    if (Platform.OS === 'web') {
-      Alert.alert('Usa la app móvil', 'La descarga de audio funciona en dispositivo o emulador, no en web.');
-      return;
-    }
-    if (!storyText?.trim()) { Alert.alert(t.alert_missing_story_title, t.alert_missing_story_msg); return; }
-    const currentVoiceId = voiceId || 'shimmer';
-    const cleanedMap = sanitizeAudioMap(audioMap);
-    if (Object.keys(cleanedMap).length !== Object.keys(audioMap).length) {
-      setAudioMap(cleanedMap);
-    }
-    setAudioLoading(true);
-    try {
-      const res = await downloadNarrationToGallery({
-        storyText,
-        voiceId: currentVoiceId,
-        locale: 'es-LATAM',
-        referenceAudioUri: selectedVoiceEntry?.referenceAudioUri,
-      });
-      const uri = res.assetUri || res.fileUri;
-      setAudioMap((prev) => ({ ...prev, [currentVoiceId]: uri }));
-      Alert.alert(t.alert_narration_ready_title, t.alert_narration_ready_msg);
-    } catch (e: any) {
-      Alert.alert('No se pudo narrar', e?.message || 'Intentalo de nuevo.');
-    } finally {
-      setAudioLoading(false);
-    }
-  }, [storyText, voiceId, selectedVoiceEntry]);
-
-  const handleShareAudio = React.useCallback(async () => {
-    if (Platform.OS === 'web') {
-      Alert.alert('Usa la app móvil', 'Compartir audio funciona en dispositivo o emulador, no en web.');
-      return;
-    }
-    const uri = audioMap[voiceId] || null;
-    if (!uri) {
-      Alert.alert(t.alert_no_audio_title, t.alert_no_audio_msg);
-      return;
-    }
-    try {
-      const canShare = await Sharing.isAvailableAsync();
-      const dialogTitle = `${(theme || 'Cuento')} ${BRAND_SUFFIX}`;
-      const mimeType = uri.toLowerCase().endsWith('.wav') ? 'audio/wav' : 'audio/mpeg';
-      if (canShare) {
-        await Sharing.shareAsync(uri, { mimeType, dialogTitle });
-      } else {
-        await Share.share({ message: dialogTitle });
-      }
-    } catch (e: any) {
-      Alert.alert('No se pudo compartir', e?.message || 'Intentalo de nuevo.');
-    }
-  }, [audioMap, voiceId, theme]);
-
-  const handlePreviewVoice = React.useCallback(async (id: string) => {
-    try {
-      setPreviewing(id);
-      const customEntry = voiceList.find((v) => v.id === id && v.isCustom);
-      const { Audio } = await import('expo-av');
-      const uri = customEntry?.referenceAudioUri || (await fetchVoicePreview(id));
-      if (previewSoundRef.current) {
-        await previewSoundRef.current.stopAsync().catch(() => {});
-        await previewSoundRef.current.unloadAsync().catch(() => {});
-        previewSoundRef.current = null;
-      }
-      if (previewObjectUrlRef.current && Platform.OS === 'web') {
-        URL.revokeObjectURL(previewObjectUrlRef.current);
-        previewObjectUrlRef.current = null;
-      }
-      if (Platform.OS === 'web' && uri.startsWith('blob:')) {
-        previewObjectUrlRef.current = uri;
-      }
-      const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true });
-      previewSoundRef.current = sound;
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (!status.isLoaded) return;
-        if (status.didJustFinish) {
-          sound.unloadAsync().catch(() => {});
-          previewSoundRef.current = null;
-          if (previewObjectUrlRef.current && Platform.OS === 'web') {
-            URL.revokeObjectURL(previewObjectUrlRef.current);
-            previewObjectUrlRef.current = null;
-          }
-          setPreviewing(null);
-        }
-      });
-    } catch (e: any) {
-      Alert.alert('No se pudo reproducir la voz', e?.message || 'Intentalo de nuevo.');
-      setPreviewing(null);
-    }
-  }, [voiceList]);
-
   const onGenerate = React.useCallback(async () => {
     setLoading(true);
     setExportingPdf(false);
@@ -1318,51 +1002,97 @@ export default function MakerScreen() {
 
   const onIllustrate = React.useCallback(async () => {
     if (!storyText) { Alert.alert(t.alert_missing_story_title, t.alert_missing_story_msg); return; }
-    setImgLoading(true);
-    try {
-      const effectiveTheme = theme || 'cuento infantil';
-      const plan = illustrationPlan.length ? illustrationPlan : buildIllustrationPlan(storyText);
+    const plan = illustrationPlan.length ? illustrationPlan : buildIllustrationPlan(storyText);
+    setIllustrationPlan(plan);
+    const effectiveTheme = theme || 'cuento infantil';
 
-      const results = await Promise.all(
-        plan.map(async (scene, index) => {
-          const sceneContext = [
-            `Escena ${index + 1}: ${scene.label}.`,
-            `Fragmento clave: ${scene.excerpt}`,
-            'Manten los mismos personajes y estilo a lo largo de las ilustraciones.',
-            'Ilustra solamente esta escena en una unica imagen (sin paneles ni collage).',
-          ].join(' ');
+    const requestSceneImage = async (
+      scene: IllustrationPlan,
+      index: number,
+      sharedPlan?: IllustrationApiPlan,
+      sharedSynopsis?: string,
+    ) => {
+      const sceneContext = [
+        `Escena ${index + 1}: ${scene.label}.`,
+        `Fragmento clave: ${scene.excerpt}`,
+        'Manten los mismos personajes y estilo a lo largo de las ilustraciones.',
+        'Ilustra solamente esta escena en una unica imagen (sin paneles ni collage).',
+      ].join(' ');
 
-          const [uri] = await callIllustrations({
-            age_range: (ageRange || '2-5') as '2-5' | '6-10',
-            theme: effectiveTheme,
-            skill: skill || 'empatia',
-            characters,
-            locale,
-            story: `${sceneContext}
+      const { images, plan: returnedPlan, synopsis: returnedSynopsis } = await callIllustrations({
+        age_range: (ageRange || '2-5') as '2-5' | '6-10',
+        theme: effectiveTheme,
+        skill: skill || 'empatia',
+        characters,
+        locale,
+        story: `${sceneContext}
 
 Resumen del cuento:
 ${storyText.slice(0, 900)}`,
-            count: 1,
-          });
+        count: 1,
+        scene_index: sceneKeyForSlot(scene.slot),
+        plan: sharedPlan,
+        synopsis: sharedSynopsis,
+      });
 
-          let finalUri: string | null = uri ?? null;
-          if (uri) {
-            try {
-              finalUri = await persistIllustrationAsset(uri, scene.slot, index);
-            } catch {
-              finalUri = uri;
-            }
-          }
+      let finalUri: string | null = images[0] ?? null;
+      if (finalUri) {
+        try {
+          finalUri = await persistIllustrationAsset(finalUri, scene.slot, index);
+        } catch {
+          // conservar el uri original si falla la persistencia local
+        }
+      }
+      return { uri: finalUri, plan: returnedPlan, synopsis: returnedSynopsis };
+    };
 
-          return { ...scene, uri: finalUri };
-        }),
-      );
+    const introScene = plan.find((s) => s.slot === 'intro');
+    const middleScene = plan.find((s) => s.slot === 'conflict');
+    const endScene = plan.find((s) => s.slot === 'resolution');
+    if (!introScene || !middleScene || !endScene) {
+      Alert.alert('No se pudieron generar imagenes', 'El plan de ilustraciones esta incompleto.');
+      return;
+    }
 
-      setIllustrationPlan(plan);
-      setIllustrations(results);
+    setIllustrationLoading({ intro: true, conflict: true, resolution: true });
+    try {
+      // Llamada 1 (escena intro): sin plan compartido -> el backend lo genera y lo devuelve. El botón
+      // "Ilustrar" (derivado de illustrationLoading) sigue deshabilitado hasta que las 3 escenas terminen,
+      // para evitar que un doble tap dispare una segunda tanda de llamadas en paralelo con la primera.
+      const first = await requestSceneImage(introScene, 0, undefined);
+      setIllustrations((prev) => mergeIllustrationResult(prev, plan, 'intro', first.uri));
+      setIllustrationLoading((prev) => ({ ...prev, intro: false }));
+      if (!first.uri) {
+        throw new Error('No se pudo generar la primera escena.');
+      }
+
+      const sharedPlan = first.plan ?? undefined;
+      const sharedSynopsis = first.synopsis ?? undefined;
+
+      // Llamadas 2 y 3, en paralelo entre si, reutilizando el plan y la sinopsis de la llamada 1 para
+      // consistencia de personaje (y para no pagar 2 llamadas extra a OpenAI de pura sinopsis repetida).
+      // allSettled (no all) para que si una falla, la otra igual se muestre en vez de perderse.
+      const [middleResult, endResult] = await Promise.allSettled([
+        requestSceneImage(middleScene, 1, sharedPlan, sharedSynopsis),
+        requestSceneImage(endScene, 2, sharedPlan, sharedSynopsis),
+      ]);
+
+      if (middleResult.status === 'fulfilled') {
+        setIllustrations((prev) => mergeIllustrationResult(prev, plan, 'conflict', middleResult.value.uri));
+      }
+      if (endResult.status === 'fulfilled') {
+        setIllustrations((prev) => mergeIllustrationResult(prev, plan, 'resolution', endResult.value.uri));
+      }
+
+      const failedCount = [middleResult, endResult].filter((r) => r.status === 'rejected').length;
+      if (failedCount > 0) {
+        Alert.alert('Algunas ilustraciones fallaron', `No se pudieron generar ${failedCount} de 3 escenas. Toca "Reilustrar" para reintentar.`);
+      }
     } catch (e: any) {
       Alert.alert('No se pudieron generar imagenes', e?.message || 'Error');
-    } finally { setImgLoading(false); }
+    } finally {
+      setIllustrationLoading({ intro: false, conflict: false, resolution: false });
+    }
   }, [storyText, ageRange, theme, skill, characters, locale, illustrationPlan]);
 
   return (
@@ -1494,19 +1224,21 @@ ${storyText.slice(0, 900)}`,
                     const group = groupedIllustrations.get(index);
                     const beforeItems = group?.before ?? [];
                     const afterItems = group?.after ?? [];
-                    const before = beforeItems.filter((item) => imgLoading || Boolean(item.uri));
-                    const after = afterItems.filter((item) => imgLoading || Boolean(item.uri));
+                    const before = beforeItems.filter((item) => illustrationLoading[item.slot] || Boolean(item.uri));
+                    const after = afterItems.filter((item) => illustrationLoading[item.slot] || Boolean(item.uri));
                     return (
                       <View key={`story-paragraph-${index}`} style={{ marginBottom: 12 }}>
                         {before.map((item, idx) => renderIllustrationItem(item, `before-${index}-${idx}`))}
-                        <Text style={{ color: THEME.text, lineHeight: 22 }}>{paragraph}</Text>
+                        <View style={{ paddingHorizontal: 10 }}>
+                          <Text style={{ color: THEME.text, lineHeight: 22 }}>{paragraph}</Text>
+                        </View>
                         {after.map((item, idx) => renderIllustrationItem(item, `after-${index}-${idx}`))}
                       </View>
                     );
                   })}
                 </View>
-                <View style={{ flexDirection: 'row', marginTop: 12, justifyContent: 'space-between' }}>
-                  <View style={{ flexDirection: 'row' }}>
+                <View style={{ flexDirection: 'row', marginTop: 12, justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
                     <Pressable onPress={saveStory} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 18, opacity: exportingPdf ? 0.5 : 1 }}>
                       {exportingPdf ? (
                         <ActivityIndicator size="small" color={THEME.accent} />
@@ -1515,9 +1247,13 @@ ${storyText.slice(0, 900)}`,
                       )}
                       <Text style={{ color: THEME.accent, marginLeft: 6 }}>{exportingPdf ? t.btn_generating_pdf : t.btn_save}</Text>
                     </Pressable>
-                    <Pressable onPress={handleShare} style={{ flexDirection: 'row', alignItems: 'center', opacity: exportingPdf ? 0.5 : 1 }}>
+                    <Pressable onPress={handleShare} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 18, opacity: exportingPdf ? 0.5 : 1 }}>
                       <Feather name="share-2" size={20} color={THEME.accent} />
                       <Text style={{ color: THEME.accent, marginLeft: 6 }}>{exportingPdf ? '...' : t.btn_share}</Text>
+                    </Pressable>
+                    <Pressable onPress={() => router.push('/story-audio')} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Feather name="music" size={20} color={THEME.accent} />
+                      <Text style={{ color: THEME.accent, marginLeft: 6 }}>Música y narrador</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -1536,97 +1272,6 @@ ${storyText.slice(0, 900)}`,
               </Text>
             )}
           </CardBox>
-
-          {storyText?.trim() ? (
-            <>
-              <View style={{ height: 16 }} />
-              <Text style={{ color: THEME.textDim, marginBottom: 6, fontWeight: '700' }}>Tu cuento</Text>
-              <MusicBar player={music} theme={THEME} />
-              <View style={{ height: 12 }} />
-              <StoryReader
-                text={storyText}
-                locale={ageRange === '6-10' ? 'es-AR' : 'es-AR'}
-                voiceLabel={voiceLabel}
-                voiceId={voiceId}
-                referenceAudioUri={selectedVoiceEntry?.referenceAudioUri}
-                audioUri={currentAudioUri}
-                onNarrationReady={(voice, uri) => setAudioMap((prev) => ({ ...prev, [voice]: uri }))}
-                onChooseNarrator={() => setShowVoiceList((v) => !v)}
-                onNarrationStart={() => { if (!music.isPlaying) music.play(); }}
-                onNarrationStop={() => { if (music.isPlaying) music.pause(); }}
-              />
-              <View style={{ marginTop: 12, padding: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: THEME.border }}>
-                <Text style={{ color: THEME.text, fontWeight: '700', marginBottom: 8 }}>Narrador</Text>
-                <Pressable
-                  onPress={() => router.push('/record-voice')}
-                  style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}
-                >
-                  <Feather name="mic" size={18} color={THEME.accent} />
-                  <Text style={{ color: THEME.accent, marginLeft: 6, fontWeight: '700' }}>Grabar mi voz</Text>
-                </Pressable>
-                {loadingVoices ? (
-                  <Text style={{ color: THEME.textDim }}>{t.settings_loading_voices}</Text>
-                ) : (
-                  <View style={{ backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 12, borderWidth: 1, borderColor: THEME.border, padding: 10 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
-                      <Text style={{ color: THEME.textDim, flexShrink: 1 }}>Narrador actual: {voiceLabel}</Text>
-                    </View>
-                    {showVoiceList ? (
-                      <View style={{ marginTop: 8, gap: 6 }}>
-                        {voiceList.map((v) => {
-                          return (
-                            <View key={v.id} style={{ paddingVertical: 8, paddingHorizontal: 8, borderWidth: 1, borderColor: THEME.border, borderRadius: 10, backgroundColor: voiceId === v.id ? 'rgba(159,210,255,0.08)' : 'transparent' }}>
-                              <Pressable
-                                onPress={() => {
-                                  setVoiceId(v.id);
-                                  saveVoicePreference(v.id).catch(() => {});
-                                }}
-                                style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}
-                              >
-                                <Feather
-                                  name={voiceId === v.id ? 'check-circle' : 'circle'}
-                                  size={18}
-                                  color={voiceId === v.id ? THEME.accent : THEME.textDim}
-                                />
-                                <View style={{ marginLeft: 8, flex: 1, minWidth: 0 }}>
-                                  <Text style={{ color: THEME.text, fontWeight: '700', flexShrink: 1 }}>{v.label}</Text>
-                                  <Text style={{ color: THEME.textDim, fontSize: 12 }}>{v.description}</Text>
-                                </View>
-                                <Pressable onPress={() => handlePreviewVoice(v.id)} style={{ marginLeft: 8 }}>
-                                  <Text style={{ color: THEME.accent }}>
-                                    {previewing === v.id ? t.settings_playing : 'Demo'}
-                                  </Text>
-                                </Pressable>
-                              </Pressable>
-                            </View>
-                          );
-                        })}
-                      </View>
-                    ) : null}
-                  </View>
-                )}
-
-                <View style={{ height: 12 }} />
-                <Text style={{ color: THEME.textDim, marginBottom: 6, flexShrink: 1 }}>Narracion (guarda en galeria)</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-                  <Pressable onPress={handleNarrationDownload} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 8, flexShrink: 1 }}>
-                    <Feather name="bookmark" size={20} color={THEME.accent} />
-                    <Text style={{ color: THEME.accent, marginLeft: 6, flexShrink: 1 }}>
-                      {audioLoading ? 'Narrando...' : currentAudioUri ? t.alert_narration_ready_title : 'Guardar narracion'}
-                    </Text>
-                  </Pressable>
-                  <Pressable onPress={handleShareAudio} style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
-                    <Feather name="share-2" size={20} color={THEME.accent} />
-                    <Text style={{ color: THEME.accent, marginLeft: 6, flexShrink: 1 }}>{t.btn_share} audio</Text>
-                  </Pressable>
-                </View>
-
-                <Text style={{ color: THEME.textDim, marginTop: 10, fontSize: 12 }}>
-                  Para PDF usa el boton "Guardar" del cuento (arriba), que genera el libro con imagenes grandes.
-                </Text>
-              </View>
-            </>
-          ) : null}
 
           <View style={{ height: 56 }} />
         </ScrollView>

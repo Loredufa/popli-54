@@ -57,6 +57,7 @@ export type TranslationKeys = {
   alert_no_audio_msg: string;
   // Navbar / menu
   menu_home: string;
+  menu_story_audio: string;
   menu_settings: string;
   menu_contact: string;
   menu_help: string;
@@ -111,6 +112,7 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     alert_no_audio_title: 'Descarga primero',
     alert_no_audio_msg: 'Descarga la narración para poder compartirla.',
     menu_home: 'Inicio',
+    menu_story_audio: 'Música y narrador',
     menu_settings: 'Configuración',
     menu_contact: 'Contacto',
     menu_help: 'Ayuda',
@@ -163,6 +165,7 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     alert_no_audio_title: 'Download first',
     alert_no_audio_msg: 'Download the narration before sharing it.',
     menu_home: 'Home',
+    menu_story_audio: 'Music & narrator',
     menu_settings: 'Settings',
     menu_contact: 'Contact',
     menu_help: 'Help',
@@ -215,6 +218,7 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     alert_no_audio_title: 'Baixe primeiro',
     alert_no_audio_msg: 'Baixe a narração antes de compartilhá-la.',
     menu_home: 'Início',
+    menu_story_audio: 'Música e narrador',
     menu_settings: 'Configurações',
     menu_contact: 'Contato',
     menu_help: 'Ajuda',
@@ -267,6 +271,7 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     alert_no_audio_title: '先にダウンロード',
     alert_no_audio_msg: '共有する前に読み上げをダウンロードしてください。',
     menu_home: 'ホーム',
+    menu_story_audio: '音楽とナレーター',
     menu_settings: '設定',
     menu_contact: 'お問い合わせ',
     menu_help: 'ヘルプ',
