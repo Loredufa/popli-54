@@ -1,10 +1,8 @@
 // src/lib/storage.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const KEY = 'cuentero_stories';
 const SESSION_KEY = 'cuentero_current_story';
 
-export type StoryItem = { id: string; createdAt: string; story: string };
 export type StorySession = {
   id: string;
   story: string;
@@ -14,31 +12,14 @@ export type StorySession = {
   audioUri?: string;
    // Compat: audioUri se mantiene, pero usamos audioMap para múltiples voces
   audioMap?: Record<string, string>;
+  /** Track de música elegido para este cuento (id de `musicPlayer.TRACKS`). */
+  musicTrackId?: string;
+  /** Id en la biblioteca si este cuento ya se guardó, para que volver a guardar actualice
+   * la misma carpeta en vez de crear otra entrada. */
+  savedId?: string;
   meta?: any;
   createdAt: string;
 };
-
-export async function loadStories(): Promise<StoryItem[]> {
-  const raw = await AsyncStorage.getItem(KEY);
-  return raw ? JSON.parse(raw) : [];
-}
-
-export async function saveStory(text: string) {
-  const entry: StoryItem = { id: String(Date.now()), createdAt: new Date().toISOString(), story: text };
-  const arr = await loadStories();
-  arr.unshift(entry);
-  await AsyncStorage.setItem(KEY, JSON.stringify(arr));
-  return entry;
-}
-
-export async function getStory(id: string): Promise<StoryItem | undefined> {
-  const all = await loadStories();
-  return all.find(s => s.id === id);
-}
-
-export async function clearStories() {
-  await AsyncStorage.removeItem(KEY);
-}
 
 export async function saveCurrentSession(session: StorySession) {
   await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));

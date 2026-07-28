@@ -13,7 +13,7 @@ npx expo start
 
 Esta app se construye sobre una decisión de arquitectura **no negociable**: no comprometer datos de los niños que la usan.
 
-- Los cuentos generados y su configuración (edad, tema, personajes, etc.) **no se guardan en ningún backend ni base de datos**. El backend los genera sin estado y los devuelve; quedan **solo en el dispositivo**, en `AsyncStorage` (`src/lib/storage.ts`: `saveStory`, `saveCurrentSession`).
+- Los cuentos generados y su configuración (edad, tema, personajes, etc.) **no se guardan en ningún backend ni base de datos**. El backend los genera sin estado y los devuelve; quedan **solo en el dispositivo**: el cuento en curso en `AsyncStorage` (`src/lib/storage.ts`: `saveCurrentSession`) y los cuentos guardados en el almacenamiento privado de la app (`src/lib/storyLibrary.ts`, ver abajo).
 - La narración por voz funciona igual: se genera sin estado en el backend y el audio resultante se guarda localmente en el teléfono, nunca en un servidor.
 - **Cualquier feature nueva que implique mandar datos a una nube — propia o de terceros — se evalúa contra esta premisa antes de implementarse.**
 - Por qué está escrito acá tan explícito: el 2026-07-10 se detectaron y se sacaron dos cosas que la violaban sin que fuera una decisión consciente del proyecto — una integración completa con ElevenLabs (voz de un tercero externo) y una tabla `story_narrations` en la base de datos del backend con el texto completo del cuento. Ninguna de las dos fue una decisión de arquitectura, se colaron. Ver `poplicuentos-api/README.md` para el detalle.
@@ -47,22 +47,44 @@ Mamá, papá o cualquier familiar puede grabar su voz, ponerle un nombre, y esa 
 - **Grabación**: 20 a 60 segundos, leyendo un guion fijo (fonéticamente variado, no "hola hola hola") que se muestra en pantalla.
 - **Sin red al grabar**: a diferencia de la versión vieja con ElevenLabs (que subía la muestra para "clonar" en la nube de un tercero), acá la grabación se copia a almacenamiento durable del dispositivo (`FileSystem.documentDirectory`) y listo — Chatterbox es zero-shot, no hace falta crear nada del lado del servidor. La red solo se usa en cada narración, transitoriamente (igual que ya pasa hoy con las voces fijas de OpenAI).
 - **Multi-voz**: hasta **3** voces guardadas a la vez (`MAX_NAMED_VOICES` en `voicePrefs.ts`), cada una con nombre propio, todas seleccionables juntas.
-- **Dónde se gestiona**: grabar desde `maker.tsx` (sección "Narrador") o desde Ajustes → "Mis voces"; borrar solo desde Ajustes → "Mis voces" (acción destructiva, separada del flujo creativo).
+- **Dónde se gestiona**: grabar desde "Música y narrador" (sección "Narrador") o desde Ajustes → "Mis voces". Borrar se puede desde los dos lados, siempre con confirmación, vía `deleteNamedVoiceCascade()` — que además limpia lo que dependía de esa voz (la narración ya generada con ella, su archivo en disco y la preferencia de narrador si era la activa). Sin la cascada quedaban entradas `custom:<id>` colgadas apuntando a una voz inexistente.
 - **Formato**: Chatterbox devuelve WAV (no MP3) — el cliente elige la extensión/mime dinámicamente según el header `X-TTS-Format`.
 
 Historia: hasta el 2026-07-10 esta feature usaba ElevenLabs, un proveedor de terceros agregado sin decisión consciente del proyecto y sin créditos configurados — se sacó por completo y se reconstruyó desde cero con el enfoque self-hosted descripto arriba.
 
+## 📚 Cuentos guardados — `src/lib/storyLibrary.ts`
+
+"Guardar cuento completo" arma **una carpeta por cuento** en el almacenamiento privado de la app, y "Cuentos guardados" la vuelve a reproducir sin red.
+
+```
+documentDirectory/cuentos/<slug>-<id>/
+  cuento.json        manifiesto (texto, meta, música elegida, índice de recursos)
+  cuento.txt         texto plano
+  cuento.pdf         libro con imágenes grandes (lo produce /maker vía expo-print)
+  ilustraciones/     PNG/JPG descargados o decodificados a disco
+  narracion/         audio ya generado, una pista por voz
+```
+
+- **El audio se copia, no se referencia.** `audioMap` puede apuntar a `cacheDirectory` (que el SO desaloja) o a un asset de galería que el usuario puede borrar; guardar la URI haría que el cuento "guardado" dejara de sonar sin aviso.
+- **Guardar no genera nada nuevo**: solo empaqueta lo que ya existe. Un cuento sin narración se guarda igual y la lista lo marca como "sin narración".
+- **Idempotente**: la sesión recuerda `savedId`, así que volver a guardar el mismo cuento actualiza su carpeta en vez de duplicar la entrada. El PDF sobrevive entre guardados, porque solo `/maker` lo produce.
+- **Tope**: 10 cuentos (`MAX_STORIES_SAVED`), con expulsión FIFO que borra la carpeta entera.
+- El índice vive en `AsyncStorage` bajo `cuentero_library`. La clave vieja `cuentero_stories` (que tenía dos esquemas incompatibles conviviendo y que ninguna pantalla llegaba a mostrar) se importa una sola vez con `migrateLegacyIndex()`.
+
 ## Estructura relevante
 
 ```
-app/                    rutas (Expo Router): tabs, story/[id], maker, settings, record-voice (modal), login...
+app/                    rutas (Expo Router): tabs, maker, story-audio, cuentos-guardados/, settings, record-voice (modal), login...
 src/
   lib/
     musicPlayer.ts       música de fondo
+    storyLibrary.ts      biblioteca de cuentos guardados (carpeta por cuento)
     ttsClient.ts          cliente TTS hacia la API (voces fijas + grabadas)
     voicePrefs.ts         preferencia de voz + voces nombradas guardadas en el dispositivo
   components/
     MusicBar.tsx          UI de música
-    StoryReader.tsx        pantalla de lectura (une música + narración)
+    NarratorPicker.tsx    selector de narrador colapsable + borrar grabaciones
+    StoryReader.tsx        reproductor del cuento en curso (genera la narración por red)
+    SavedStoryPlayer.tsx   reproductor de un cuento ya guardado (audio local, sin red)
     VoiceRecorder.tsx      grabación de voz familiar (nombre, guion, 20-60s)
 ```

@@ -1,6 +1,5 @@
 // app/maker.tsx
 import { Feather } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
@@ -14,7 +13,15 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAuth } from '../src/auth/AuthProvider';
 import AppNavbar, { type NavbarMenuItem } from '../src/components/AppNavbar';
 import { clearCurrentSession } from '../src/lib/storage';
-import { useStory } from '../src/story/StoryContext';
+import {
+  DEFAULT_STORY_TITLE,
+  ensureDir,
+  extToMime,
+  guessImageExtension,
+  saveStoryBundle,
+  slugify,
+} from '../src/lib/storyLibrary';
+import { sanitizeAudioMap, useStory } from '../src/story/StoryContext';
 import { CardBox, GradientBG, THEME } from '../src/ui/theme';
 import type {
   IllustrationSlot, IllustrationPlan, IllustrationResult,
@@ -191,55 +198,10 @@ function toImprenta(text: string) {
   return (text || '').toLocaleUpperCase('es-ES');
 }
 
-function slugify(value: string) {
-  const basic = value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase();
-  return basic || 'cuento';
-}
-
-const MAX_STORIES_SAVED = 10;
-const DEFAULT_STORY_TITLE = 'Tu cuento';
 const BRAND_SUFFIX = 'by PopliLandia';
 
 const ILLUSTRATION_DIR =
   (FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? '') + 'illustrations/';
-const SAVED_STORIES_DIR =
-  (FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? '') + 'savedStories/';
-
-async function ensureDir(path: string) {
-  if (!path) return;
-  const info = await FileSystem.getInfoAsync(path);
-  if (!info.exists) {
-    await FileSystem.makeDirectoryAsync(path, { intermediates: true });
-  }
-}
-
-function guessImageExtension(uri: string) {
-  if (/\.png($|\?)/i.test(uri)) return 'png';
-  if (/\.jpe?g($|\?)/i.test(uri)) return 'jpg';
-  if (/\.webp($|\?)/i.test(uri)) return 'webp';
-  if (/^data:image\/png/i.test(uri)) return 'png';
-  if (/^data:image\/jpe?g/i.test(uri)) return 'jpg';
-  if (/^data:image\/webp/i.test(uri)) return 'webp';
-  return 'png';
-}
-
-function extToMime(ext: string) {
-  switch (ext.toLowerCase()) {
-    case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg';
-    case 'webp':
-      return 'image/webp';
-    case 'png':
-    default:
-      return 'image/png';
-  }
-}
 
 const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 const BASE64_ENCODING =
@@ -335,98 +297,6 @@ async function persistIllustrationAsset(uri: string, slot: IllustrationSlot, ind
   }
 }
 
-type SavedStoryMetadata = {
-  id: string;
-  title: string;
-  createdAt: string;
-  story: string;
-  meta?: any;
-  illustrations: Array<Pick<IllustrationResult, 'slot' | 'label' | 'uri'>>;
-  fileUri: string;
-};
-
-type SavedStoryIndexItem = {
-  id: string;
-  title: string;
-  createdAt: string;
-  fileUri: string;
-  metadataUri: string;
-  metaSummary?: {
-    age_range?: string;
-    skill?: string;
-    tone?: string;
-  };
-};
-
-async function deleteFileQuiet(uri?: string | null) {
-  if (!uri) return;
-  try {
-    await FileSystem.deleteAsync(uri, { idempotent: true });
-  } catch { }
-}
-
-async function persistStoryMetadataFile(data: SavedStoryMetadata) {
-  await ensureDir(SAVED_STORIES_DIR);
-  const path = `${SAVED_STORIES_DIR}${data.id}.json`;
-  await FileSystem.writeAsStringAsync(path, JSON.stringify(data));
-  return path;
-}
-
-async function normalizeStoredIndexItem(raw: any): Promise<SavedStoryIndexItem | null> {
-  if (!raw || typeof raw !== 'object') return null;
-  const idRaw = raw.id ?? raw.createdAt ?? '';
-  const id = typeof idRaw === 'string' && idRaw ? idRaw : String(idRaw || '');
-  if (!id) return null;
-  const title =
-    typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : DEFAULT_STORY_TITLE;
-  const createdAt =
-    typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString();
-  const fileUri = typeof raw.fileUri === 'string' ? raw.fileUri : '';
-  let metadataUri = typeof raw.metadataUri === 'string' ? raw.metadataUri : '';
-
-  const metaSummarySource = raw.metaSummary || raw.meta;
-  const metaSummary =
-    metaSummarySource && typeof metaSummarySource === 'object'
-      ? {
-        age_range:
-          typeof metaSummarySource.age_range === 'string'
-            ? metaSummarySource.age_range
-            : undefined,
-        skill:
-          typeof metaSummarySource.skill === 'string' ? metaSummarySource.skill : undefined,
-        tone: typeof metaSummarySource.tone === 'string' ? metaSummarySource.tone : undefined,
-      }
-      : undefined;
-
-  if (!metadataUri && (typeof raw.story === 'string' || Array.isArray(raw.illustrations))) {
-    const metadataPayload: SavedStoryMetadata = {
-      id,
-      title,
-      createdAt,
-      story: typeof raw.story === 'string' ? raw.story : '',
-      meta: raw.meta && typeof raw.meta === 'object' ? raw.meta : undefined,
-      illustrations: Array.isArray(raw.illustrations)
-        ? raw.illustrations.map((item: any) => ({
-          slot: item?.slot ?? 'intro',
-          label: typeof item?.label === 'string' ? item.label : '',
-          uri: item?.uri ?? null,
-        }))
-        : [],
-      fileUri,
-    };
-    metadataUri = await persistStoryMetadataFile(metadataPayload);
-  }
-
-  return {
-    id,
-    title,
-    createdAt,
-    fileUri,
-    metadataUri,
-    metaSummary,
-  };
-}
-
 function mergeIllustrationResult(
   prev: IllustrationResult[],
   plan: IllustrationPlan[],
@@ -468,7 +338,7 @@ export default function MakerScreen() {
   const {
     storyText, setStoryText, meta, setMeta, theme, setTheme,
     illustrationPlan, setIllustrationPlan, illustrations, setIllustrations,
-    setAudioMap, clearStory,
+    audioMap, setAudioMap, musicTrackId, savedId, setSavedId, clearStory,
   } = useStory();
   const [ageRange, setAgeRange] = React.useState<'2-5' | '6-10' | ''>('');
   const [skill, setSkill] = React.useState('');
@@ -489,6 +359,7 @@ export default function MakerScreen() {
   const speakingRef = React.useRef(false);
   const [loggingOut, setLoggingOut] = React.useState(false);
   const [exportingPdf, setExportingPdf] = React.useState(false);
+  const [savingStory, setSavingStory] = React.useState(false);
 
   React.useEffect(() => {
     if (!authLoading && !user) {
@@ -853,8 +724,11 @@ export default function MakerScreen() {
     }
   }, [storyText, exportStoryPdf, hasIllustrations, theme, exportingPdf]);
 
+  // Guardar = armar la carpeta del cuento en la biblioteca (texto, ilustraciones, PDF, musica y
+  // narracion ya generada). Compartir es otra cosa y vive en handleShare: antes este boton hacia
+  // las dos, y el indice que escribia no lo leia ninguna pantalla.
   const saveStory = React.useCallback(async () => {
-    if (!storyText || exportingPdf) return;
+    if (!storyText || exportingPdf || savingStory) return;
     if (Platform.OS === 'web') {
       try {
         await exportStoryPdf();
@@ -864,23 +738,11 @@ export default function MakerScreen() {
       }
       return;
     }
-    const key = 'cuentero_stories';
-    let arrRef: SavedStoryIndexItem[] = [];
-    let pdfUri: string | null = null;
-    let metadataUri: string | null = null;
-    let entryId: string | null = null;
+    setSavingStory(true);
     try {
-      const baseTitle = theme?.trim() || DEFAULT_STORY_TITLE;
-      const dialogTitle = `${baseTitle} ${BRAND_SUFFIX}`;
-      entryId = String(Date.now());
-      const createdAt = new Date().toISOString();
-      pdfUri = await exportStoryPdf();
-      if (!pdfUri) throw new Error('No se pudo generar el archivo PDF.');
-
-      const metadataPayload: SavedStoryMetadata = {
-        id: entryId,
-        title: baseTitle,
-        createdAt,
+      const entry = await saveStoryBundle({
+        existingId: savedId,
+        title: theme?.trim() || DEFAULT_STORY_TITLE,
         story: storyText,
         meta,
         illustrations: illustrations.map((item) => ({
@@ -888,85 +750,29 @@ export default function MakerScreen() {
           label: item.label,
           uri: item.uri ?? null,
         })),
-        fileUri: pdfUri,
-      };
-      metadataUri = await persistStoryMetadataFile(metadataPayload);
-
-      const indexEntry: SavedStoryIndexItem = {
-        id: entryId,
-        title: baseTitle,
-        createdAt,
-        fileUri: pdfUri,
-        metadataUri,
-        metaSummary: meta
-          ? {
-            age_range: meta?.age_range,
-            skill: meta?.skill,
-            tone: meta?.tone,
-          }
-          : undefined,
-      };
-
-      const prev = await AsyncStorage.getItem(key);
-      let arr: SavedStoryIndexItem[] = [];
-      if (prev) {
-        try {
-          const parsed = JSON.parse(prev);
-          if (Array.isArray(parsed)) {
-            for (const item of parsed) {
-              const normalized = await normalizeStoredIndexItem(item);
-              if (normalized) arr.push(normalized);
-            }
-          }
-        } catch {
-          arr = [];
-        }
-      }
-
-      arr.unshift(indexEntry);
-      while (arr.length > MAX_STORIES_SAVED) {
-        const removed = arr.pop();
-        if (removed) {
-          await deleteFileQuiet(removed.fileUri);
-          await deleteFileQuiet(removed.metadataUri);
-        }
-      }
-
-      arrRef = arr;
-      await AsyncStorage.setItem(key, JSON.stringify(arr));
-
-      const canShareFile = await Sharing.isAvailableAsync();
-      if (canShareFile && pdfUri) {
-        await Sharing.shareAsync(pdfUri, {
-          mimeType: 'application/pdf',
-          dialogTitle,
-        });
-      }
-
+        audioMap: sanitizeAudioMap(audioMap),
+        musicTrackId,
+        exportPdf: exportStoryPdf,
+      });
+      setSavedId(entry.id);
       Alert.alert(
-        'Guardado',
-        canShareFile && pdfUri
-          ? 'Se genero un PDF del cuento. Selecciona Guardar en tu dispositivo.'
-          : `Se genero un PDF del cuento en: ${pdfUri ?? 'archivo'}`,
+        'Cuento guardado',
+        entry.hasAudio
+          ? 'Ya esta en "Cuentos guardados", listo para volver a escucharlo.'
+          : 'Ya esta en "Cuentos guardados". Todavia no tiene narracion: generala en "Musica y narrador" y volve a guardar.',
       );
     } catch (err: any) {
       console.warn('saveStory failed', err);
-      await deleteFileQuiet(metadataUri);
-      await deleteFileQuiet(pdfUri);
       const message = err?.message || 'No se pudo guardar el cuento.';
       if (typeof message === 'string' && message.toLowerCase().includes('sqlite_full')) {
-        try {
-          if (arrRef.length) {
-            const reverted = entryId ? arrRef.filter(item => item.id !== entryId) : arrRef;
-            await AsyncStorage.setItem(key, JSON.stringify(reverted));
-          }
-        } catch { }
         Alert.alert('Sin espacio', 'Tu biblioteca esta llena. Borra cuentos guardados o libera espacio en el dispositivo.');
       } else {
         Alert.alert('Ups', message);
       }
+    } finally {
+      setSavingStory(false);
     }
-  }, [storyText, meta, illustrations, exportStoryPdf, hasIllustrations, theme]);
+  }, [storyText, exportingPdf, savingStory, meta, illustrations, audioMap, musicTrackId, savedId, setSavedId, exportStoryPdf, theme]);
 
   const onGenerate = React.useCallback(async () => {
     setLoading(true);
@@ -976,6 +782,8 @@ export default function MakerScreen() {
     setIllustrationPlan([]);
     setIllustrations([]);
     setAudioMap({});
+    // Cuento nuevo => entrada nueva en la biblioteca, no una actualizacion de la anterior.
+    setSavedId(null);
     try {
       const payload = {
         age_range: ageRange,
@@ -998,7 +806,7 @@ export default function MakerScreen() {
     } catch (e: any) {
       Alert.alert('No se pudo generar', e?.message || 'Error desconocido');
     } finally { setLoading(false); }
-  }, [ageRange, theme, skill, characters, locale, minutes, storyLanguage, category, genre]);
+  }, [ageRange, theme, skill, characters, locale, minutes, storyLanguage, category, genre, setSavedId]);
 
   const onIllustrate = React.useCallback(async () => {
     if (!storyText) { Alert.alert(t.alert_missing_story_title, t.alert_missing_story_msg); return; }
@@ -1239,13 +1047,19 @@ ${storyText.slice(0, 900)}`,
                 </View>
                 <View style={{ flexDirection: 'row', marginTop: 12, justifyContent: 'space-between', flexWrap: 'wrap' }}>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                    <Pressable onPress={saveStory} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 18, opacity: exportingPdf ? 0.5 : 1 }}>
-                      {exportingPdf ? (
+                    <Pressable
+                      onPress={saveStory}
+                      disabled={exportingPdf || savingStory}
+                      style={{ flexDirection: 'row', alignItems: 'center', marginRight: 18, opacity: exportingPdf || savingStory ? 0.5 : 1 }}
+                    >
+                      {exportingPdf || savingStory ? (
                         <ActivityIndicator size="small" color={THEME.accent} />
                       ) : (
-                        <Feather name="bookmark" size={20} color={THEME.accent} />
+                        <Feather name="folder-plus" size={20} color={THEME.accent} />
                       )}
-                      <Text style={{ color: THEME.accent, marginLeft: 6 }}>{exportingPdf ? t.btn_generating_pdf : t.btn_save}</Text>
+                      <Text style={{ color: THEME.accent, marginLeft: 6 }}>
+                        {exportingPdf ? t.btn_generating_pdf : savingStory ? 'Guardando...' : 'Guardar cuento completo'}
+                      </Text>
                     </Pressable>
                     <Pressable onPress={handleShare} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 18, opacity: exportingPdf ? 0.5 : 1 }}>
                       <Feather name="share-2" size={20} color={THEME.accent} />

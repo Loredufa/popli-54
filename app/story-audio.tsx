@@ -9,13 +9,21 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAuth } from '../src/auth/AuthProvider';
 import AppNavbar from '../src/components/AppNavbar';
 import MusicBar from '../src/components/MusicBar';
+import NarratorPicker, { type NarratorVoice } from '../src/components/NarratorPicker';
 import StoryReader from '../src/components/StoryReader';
 import { buildMenuItems } from '../src/constants/menu';
 import { useLanguage } from '../src/i18n/LanguageContext';
 import { useMusicPlayer } from '../src/lib/musicPlayer';
 import { clearCurrentSession } from '../src/lib/storage';
+import { saveStoryBundle } from '../src/lib/storyLibrary';
 import { downloadNarrationToGallery, fetchVoices, fetchVoicePreview, type VoiceOption } from '../src/lib/ttsClient';
-import { loadVoicePreference, saveVoicePreference, loadNamedVoices, type NamedVoiceData } from '../src/lib/voicePrefs';
+import {
+  deleteNamedVoiceCascade,
+  loadVoicePreference,
+  saveVoicePreference,
+  loadNamedVoices,
+  type NamedVoiceData,
+} from '../src/lib/voicePrefs';
 import { sanitizeAudioMap, useStory } from '../src/story/StoryContext';
 import { CardBox, GradientBG, THEME } from '../src/ui/theme';
 
@@ -29,15 +37,20 @@ const VOICE_LABELS: Record<string, string> = {
 export default function StoryAudioScreen() {
   const { t } = useLanguage();
   const { user, logout } = useAuth();
-  const { storyText, theme, voiceId, setVoiceId, audioMap, setAudioMap, hydrated, clearStory } = useStory();
+  const {
+    storyText, meta, theme, illustrations,
+    voiceId, setVoiceId, audioMap, setAudioMap,
+    musicTrackId, setMusicTrackId, savedId, setSavedId,
+    hydrated, clearStory,
+  } = useStory();
 
   const [loggingOut, setLoggingOut] = React.useState(false);
-  const music = useMusicPlayer();
+  const music = useMusicPlayer({ initialTrackId: musicTrackId, onTrackChange: setMusicTrackId });
   const [audioLoading, setAudioLoading] = React.useState(false);
+  const [savingStory, setSavingStory] = React.useState(false);
   const [voices, setVoices] = React.useState<VoiceOption[]>([]);
   const [loadingVoices, setLoadingVoices] = React.useState(false);
   const [previewing, setPreviewing] = React.useState<string | null>(null);
-  const [showVoiceList, setShowVoiceList] = React.useState(true);
   const [namedVoices, setNamedVoices] = React.useState<NamedVoiceData[]>([]);
   const previewSoundRef = React.useRef<any>(null);
   const previewObjectUrlRef = React.useRef<string | null>(null);
@@ -174,8 +187,10 @@ export default function StoryAudioScreen() {
         locale: 'es-LATAM',
         referenceAudioUri: selectedVoiceEntry?.referenceAudioUri,
       });
-      const uri = res.assetUri || res.fileUri;
-      setAudioMap((prev) => ({ ...prev, [currentVoiceId]: uri }));
+      // Guardamos SIEMPRE `fileUri` (documentDirectory, nuestro) y no el asset de galería: ese
+      // el usuario lo puede borrar desde la galería, y ademas en iOS es un `ph://` que despues
+      // no podemos copiar a la carpeta del cuento.
+      setAudioMap((prev) => ({ ...prev, [currentVoiceId]: res.fileUri }));
       Alert.alert(t.alert_narration_ready_title, t.alert_narration_ready_msg);
     } catch (e: any) {
       Alert.alert('No se pudo narrar', e?.message || 'Intentalo de nuevo.');
@@ -246,6 +261,74 @@ export default function StoryAudioScreen() {
     }
   }, [voiceList]);
 
+  const handleDeleteVoice = React.useCallback((voice: NarratorVoice) => {
+    const namedId = voice.id.replace(/^custom:/, '');
+    Alert.alert(
+      'Borrar grabación',
+      `¿Borrar la voz "${voice.label}"? Vas a poder volver a grabarla cuando quieras.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Borrar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const result = await deleteNamedVoiceCascade(namedId, {
+                currentVoiceId: voiceId,
+                audioMap,
+              });
+              setNamedVoices((prev) => prev.filter((v) => v.id !== namedId));
+              setAudioMap(result.audioMap);
+              if (result.preferenceReset) setVoiceId(result.nextVoiceId);
+            } catch (e: any) {
+              Alert.alert('No se pudo borrar', e?.message || 'Intentalo de nuevo.');
+            }
+          },
+        },
+      ],
+    );
+  }, [voiceId, audioMap, setAudioMap, setVoiceId]);
+
+  const handleSaveStory = React.useCallback(async () => {
+    if (savingStory) return;
+    if (Platform.OS === 'web') {
+      Alert.alert('Usa la app móvil', 'Guardar el cuento completo funciona en dispositivo o emulador, no en web.');
+      return;
+    }
+    if (!storyText?.trim()) { Alert.alert(t.alert_missing_story_title, t.alert_missing_story_msg); return; }
+    setSavingStory(true);
+    try {
+      const voiceLabels: Record<string, string> = {};
+      voiceList.forEach((v) => { voiceLabels[v.id] = v.label; });
+      const entry = await saveStoryBundle({
+        existingId: savedId,
+        title: theme?.trim() || 'Tu cuento',
+        story: storyText,
+        meta,
+        illustrations: illustrations.map((item) => ({ slot: item.slot, label: item.label, uri: item.uri ?? null })),
+        audioMap: sanitizeAudioMap(audioMap),
+        voiceLabels,
+        musicTrackId: music.currentTrack.id,
+      });
+      setSavedId(entry.id);
+      Alert.alert(
+        'Cuento guardado',
+        entry.hasAudio
+          ? 'Lo vas a encontrar en "Cuentos guardados", listo para volver a escucharlo.'
+          : 'Lo vas a encontrar en "Cuentos guardados". Todavía no tiene narración: generala y volvé a guardar.',
+      );
+    } catch (e: any) {
+      const message = e?.message || 'No se pudo guardar el cuento.';
+      if (typeof message === 'string' && message.toLowerCase().includes('sqlite_full')) {
+        Alert.alert('Sin espacio', 'Tu biblioteca está llena. Borrá cuentos guardados o liberá espacio en el dispositivo.');
+      } else {
+        Alert.alert('Ups', message);
+      }
+    } finally {
+      setSavingStory(false);
+    }
+  }, [savingStory, storyText, theme, meta, illustrations, audioMap, voiceList, music, savedId, setSavedId, t]);
+
   if (!hydrated) {
     return (
       <GestureHandlerRootView style={{ flex: 1 }}>
@@ -288,7 +371,6 @@ export default function StoryAudioScreen() {
                 referenceAudioUri={selectedVoiceEntry?.referenceAudioUri}
                 audioUri={currentAudioUri}
                 onNarrationReady={(voice, uri) => setAudioMap((prev) => ({ ...prev, [voice]: uri }))}
-                onChooseNarrator={() => setShowVoiceList((v) => !v)}
                 onNarrationStart={() => { if (!music.isPlaying) music.play(); }}
                 onNarrationStop={() => { if (music.isPlaying) music.pause(); }}
               />
@@ -301,47 +383,21 @@ export default function StoryAudioScreen() {
                   <Feather name="mic" size={18} color={THEME.accent} />
                   <Text style={{ color: THEME.accent, marginLeft: 6, fontWeight: '700' }}>Grabar mi voz</Text>
                 </Pressable>
-                {loadingVoices ? (
-                  <Text style={{ color: THEME.textDim }}>{t.settings_loading_voices}</Text>
-                ) : (
-                  <View style={{ backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 12, borderWidth: 1, borderColor: THEME.border, padding: 10 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
-                      <Text style={{ color: THEME.textDim, flexShrink: 1 }}>Narrador actual: {voiceLabel}</Text>
-                    </View>
-                    {showVoiceList ? (
-                      <View style={{ marginTop: 8, gap: 6 }}>
-                        {voiceList.map((v) => {
-                          return (
-                            <View key={v.id} style={{ paddingVertical: 8, paddingHorizontal: 8, borderWidth: 1, borderColor: THEME.border, borderRadius: 10, backgroundColor: voiceId === v.id ? 'rgba(159,210,255,0.08)' : 'transparent' }}>
-                              <Pressable
-                                onPress={() => {
-                                  setVoiceId(v.id);
-                                  saveVoicePreference(v.id).catch(() => {});
-                                }}
-                                style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}
-                              >
-                                <Feather
-                                  name={voiceId === v.id ? 'check-circle' : 'circle'}
-                                  size={18}
-                                  color={voiceId === v.id ? THEME.accent : THEME.textDim}
-                                />
-                                <View style={{ marginLeft: 8, flex: 1, minWidth: 0 }}>
-                                  <Text style={{ color: THEME.text, fontWeight: '700', flexShrink: 1 }}>{v.label}</Text>
-                                  <Text style={{ color: THEME.textDim, fontSize: 12 }}>{v.description}</Text>
-                                </View>
-                                <Pressable onPress={() => handlePreviewVoice(v.id)} style={{ marginLeft: 8 }}>
-                                  <Text style={{ color: THEME.accent }}>
-                                    {previewing === v.id ? t.settings_playing : 'Demo'}
-                                  </Text>
-                                </Pressable>
-                              </Pressable>
-                            </View>
-                          );
-                        })}
-                      </View>
-                    ) : null}
-                  </View>
-                )}
+                <NarratorPicker
+                  voices={voiceList}
+                  voiceId={voiceId}
+                  voiceLabel={voiceLabel}
+                  loading={loadingVoices}
+                  loadingLabel={t.settings_loading_voices}
+                  previewingId={previewing}
+                  previewingLabel={t.settings_playing}
+                  onSelect={(id) => {
+                    setVoiceId(id);
+                    saveVoicePreference(id).catch(() => {});
+                  }}
+                  onPreview={handlePreviewVoice}
+                  onDelete={handleDeleteVoice}
+                />
 
                 <View style={{ height: 12 }} />
                 <Text style={{ color: THEME.textDim, marginBottom: 6, flexShrink: 1 }}>Narracion (guarda en galeria)</Text>
@@ -358,8 +414,21 @@ export default function StoryAudioScreen() {
                   </Pressable>
                 </View>
 
-                <Text style={{ color: THEME.textDim, marginTop: 10, fontSize: 12 }}>
-                  Para PDF usa el boton "Guardar" del cuento (arriba), que genera el libro con imagenes grandes.
+                <View style={{ height: 1, backgroundColor: THEME.border, marginVertical: 14 }} />
+
+                <Pressable
+                  onPress={handleSaveStory}
+                  disabled={savingStory}
+                  style={{ flexDirection: 'row', alignItems: 'center', opacity: savingStory ? 0.5 : 1 }}
+                >
+                  <Feather name="folder-plus" size={20} color={THEME.accent} />
+                  <Text style={{ color: THEME.accent, marginLeft: 6, fontWeight: '700', flexShrink: 1 }}>
+                    {savingStory ? 'Guardando...' : 'Guardar cuento completo'}
+                  </Text>
+                </Pressable>
+                <Text style={{ color: THEME.textDim, marginTop: 6, fontSize: 12 }}>
+                  Guarda el texto, las ilustraciones, el PDF, la música elegida y la narración ya
+                  generada en “Cuentos guardados”, para volver a escucharlo dentro de la app.
                 </Text>
               </View>
             </CardBox>

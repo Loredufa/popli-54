@@ -89,3 +89,47 @@ export async function deleteNamedVoice(id: string): Promise<void> {
     await FileSystem.deleteAsync(target.localUri, { idempotent: true }).catch(() => {});
   }
 }
+
+export const FALLBACK_VOICE_ID = 'alloy';
+
+export type DeleteNamedVoiceResult = {
+  /** Voz que quedó seleccionada: la misma de antes, o el fallback si borramos la activa. */
+  nextVoiceId: string;
+  /** `true` si hubo que cambiar la voz seleccionada. */
+  preferenceReset: boolean;
+  /** `audioMap` sin la narración de la voz borrada. */
+  audioMap: Record<string, string>;
+};
+
+/**
+ * Borra una voz grabada y limpia TODO lo que la referencia: el registro, el archivo de la
+ * grabación, la preferencia de narrador (si era la activa) y la narración ya generada con esa
+ * voz. Sin esto quedaban entradas `custom:<id>` colgadas en `audioMap` y en la sesión, apuntando
+ * a una voz que ya no existe.
+ */
+export async function deleteNamedVoiceCascade(
+  id: string,
+  opts: { currentVoiceId?: string; audioMap?: Record<string, string> } = {},
+): Promise<DeleteNamedVoiceResult> {
+  const { currentVoiceId, audioMap = {} } = opts;
+  const composedId = `custom:${id}`;
+
+  await deleteNamedVoice(id);
+
+  const orphanAudioUri = audioMap[composedId];
+  if (orphanAudioUri) {
+    await FileSystem.deleteAsync(orphanAudioUri, { idempotent: true }).catch(() => {});
+  }
+  const { [composedId]: _removed, ...restAudio } = audioMap;
+
+  const preferenceReset = currentVoiceId === composedId;
+  if (preferenceReset) {
+    await saveVoicePreference(FALLBACK_VOICE_ID);
+  }
+
+  return {
+    nextVoiceId: preferenceReset ? FALLBACK_VOICE_ID : (currentVoiceId ?? FALLBACK_VOICE_ID),
+    preferenceReset,
+    audioMap: restAudio,
+  };
+}

@@ -19,10 +19,16 @@ export default function MusicBar({ player, theme }: Props) {
 
   return (
     <View style={{ backgroundColor: theme.card, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: theme.border }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Pressable onPress={toggle} style={{ flexDirection: 'row', alignItems: 'center' }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <Pressable onPress={toggle} style={{ flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 }}>
           <Feather name={isPlaying ? 'pause' : 'play'} size={20} color={theme.accent} />
-          <Text style={{ color: theme.text, marginLeft: 8, fontWeight: '700' }}>{currentTrack.title}</Text>
+          <Text
+            style={{ color: theme.text, marginLeft: 8, fontWeight: '700', flex: 1 }}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {currentTrack.title}
+          </Text>
         </Pressable>
         <Pressable onPress={() => setShowList((v) => !v)}>
           <Text style={{ color: theme.accent, fontWeight: '700' }}>Elegir música</Text>

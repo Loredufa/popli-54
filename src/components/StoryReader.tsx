@@ -3,7 +3,6 @@ import { Feather } from '@expo/vector-icons';
 import * as React from 'react';
 import {
   Pressable,
-  ScrollView,
   Text,
   View,
   Alert,
@@ -29,7 +28,6 @@ type Props = {
   voiceLabel?: string;
   voiceId?: string; // alloy | nova | shimmer | custom:<id>
   referenceAudioUri?: string | null; // grabación local para voces custom
-  onChooseNarrator?: () => void;
   onNarrationStart?: () => void;
   onNarrationStop?: () => void;
   audioUri?: string | null;
@@ -42,15 +40,13 @@ export default function StoryReader({
   voiceLabel,
   voiceId,
   referenceAudioUri,
-  onChooseNarrator,
   onNarrationStart,
   onNarrationStop,
   audioUri,
   onNarrationReady,
 }: Props) {
   const segments = React.useMemo(() => splitIntoSegments(text), [text]);
-  const [idx, setIdx] = React.useState(0);
-  const [rate, setRate] = React.useState(0.98);
+  const [rate] = React.useState(0.98);
   const [speaking, setSpeaking] = React.useState(false);
   const [loadingAudio, setLoadingAudio] = React.useState(false);
   const [hasSound, setHasSound] = React.useState(false);
@@ -66,9 +62,8 @@ export default function StoryReader({
     };
   }, []);
 
-  // Si cambia el cuento, reiniciar cursor/parar sonido
+  // Si cambia el cuento, parar el sonido en curso
   React.useEffect(() => {
-    setIdx(0);
     soundRef.current?.stopAsync().catch(() => {});
     setSpeaking(false);
   }, [text]);
@@ -162,16 +157,10 @@ export default function StoryReader({
   const onStop = React.useCallback(() => {
     soundRef.current?.stopAsync().catch(() => {});
     setSpeaking(false);
-    setIdx(0);
     onNarrationStop?.();
     setStatusText(null);
     setHasSound(false);
   }, [onNarrationStop]);
-
-  const goTo = React.useCallback((i: number) => {
-    // No segment skip en audio TTS remoto; solo actualizamos indice visual
-    setIdx(i);
-  }, []);
 
   return (
     <View
@@ -191,11 +180,6 @@ export default function StoryReader({
         >
           Narrador: {voiceLabel || 'Pablo'}
         </Text>
-        {onChooseNarrator ? (
-          <Pressable onPress={onChooseNarrator}>
-            <Text style={{ color: THEME.accent, fontWeight: '700' }}>Elegir narrador</Text>
-          </Pressable>
-        ) : null}
       </View>
       <Text style={{ color: THEME.textDim, marginBottom: 12, fontSize: 12 }}>
         Voz es-AR
@@ -226,16 +210,6 @@ export default function StoryReader({
         </Text>
         <Text style={{ color: THEME.text, fontWeight: '600' }}>{rate.toFixed(2)}x</Text>
       </View>
-
-      {/* Ir a... */}
-      <Text style={{ color: THEME.textDim, marginBottom: 6 }}>Ir a...</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 6 }}>
-        <View style={{ flexDirection: 'row' }}>
-          {segments.map((_, i) => (
-            <PageChip key={i} label={`${i + 1}`} selected={i === idx} onPress={() => goTo(i)} />
-          ))}
-        </View>
-      </ScrollView>
 
       {/* Texto oculta para evitar duplicados: usaremos solo controles */}
     </View>
@@ -270,25 +244,6 @@ function splitIntoSegments(txt: string): string[] {
   return out.slice(0, 8);
 }
 
-function speakOnce(
-  text: string,
-  language: string,
-  rate: number,
-  voice?: string
-): Promise<void> {
-  return new Promise<void>((resolve) => {
-    Speech.speak(text.replace(/\*\*/g, ''), {
-      language,
-      voice,
-      rate,
-      onDone: resolve,
-      onStopped: resolve,
-      onError: () => resolve(), // -> envolvemos para que el tipo sea (err: Error) => void
-    });
-  });
-}
-const wait = (ms: number) => new Promise(res => setTimeout(res, ms));
-
 /* ----------------- UI atomos ----------------- */
 
 const IconButton = ({
@@ -321,52 +276,6 @@ const IconButton = ({
   </Pressable>
 );
 
-const RoundIcon = ({ icon, onPress }: { icon: keyof typeof Feather.glyphMap; onPress?: () => void }) => (
-  <Pressable
-    onPress={onPress}
-    style={({ pressed }) => ({
-      width: 34,
-      height: 34,
-      borderRadius: 999,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: THEME.border,
-      marginHorizontal: 4,
-      opacity: pressed ? 0.8 : 1,
-    })}
-  >
-    <Feather name={icon} size={16} color={THEME.accent} />
-  </Pressable>
-);
-
-const PageChip = ({
-  label,
-  selected = false,
-  onPress,
-}: {
-  label: string;
-  selected?: boolean;
-  onPress?: () => void;
-}) => (
-  <Pressable
-    onPress={onPress}
-    style={({ pressed }) => ({
-      opacity: pressed ? 0.8 : 1,
-      width: 36,
-      height: 36,
-      borderRadius: 10,
-      marginRight: 8,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: selected ? THEME.accent : THEME.border,
-      backgroundColor: selected ? 'rgba(159,210,255,0.06)' : 'transparent',
-    })}
-  >
-    <Text style={{ color: selected ? THEME.accent : THEME.text }}>{label}</Text>
-  </Pressable>
-);
 
 const SparkSpinner = () => {
   const spin = React.useRef(new Animated.Value(0)).current;

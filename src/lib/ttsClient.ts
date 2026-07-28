@@ -5,11 +5,13 @@ import { Platform } from 'react-native';
 import { apiUrl } from './api';
 
 const DEFAULT_TIMEOUT_MS = 45000;
-// El backend puede esperar hasta ~210s (90s de wait inicial + 120s de polling,
-// ver RUNPOD_POLL_BUDGET_MS en poplicuentos-api/lib/tts.ts) antes de darse por
-// vencido con RunPod. Este timeout tiene que ser mayor a eso, si no la app
-// aborta la conexión antes de que el backend termine de esperar su propia respuesta.
-const CUSTOM_VOICE_TIMEOUT_MS = 240000;
+// El backend espera hasta ~280s por RunPod (RUNPOD_POLL_BUDGET_MS en
+// poplicuentos-api/lib/tts.ts) y Vercel corta la función a los 300s (maxDuration en
+// app/api/tts/narrate/route.ts). Este timeout tiene que ser mayor que los dos, si no
+// la app aborta la conexión antes de que el backend termine de esperar su respuesta.
+// Es tanto porque el worker genera el cuento por pedazos: ~12 llamadas al modelo para
+// un cuento de 4 minutos, más el arranque en frío del worker.
+const CUSTOM_VOICE_TIMEOUT_MS = 320000;
 const BASE64_ENCODING =
   (FileSystem as any)?.EncodingType?.Base64 ?? 'base64';
 

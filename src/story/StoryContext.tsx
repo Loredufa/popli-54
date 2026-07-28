@@ -1,6 +1,7 @@
 // src/story/StoryContext.tsx
 import * as React from 'react';
 import { saveCurrentSession, loadCurrentSession, type StorySession } from '../lib/storage';
+import { DEFAULT_TRACK_ID } from '../lib/musicPlayer';
 import { loadVoicePreference } from '../lib/voicePrefs';
 import { buildIllustrationPlan } from './plan';
 import type { IllustrationPlan, IllustrationResult } from './types';
@@ -30,6 +31,11 @@ type StoryContextType = {
   setVoiceId: React.Dispatch<React.SetStateAction<string>>;
   audioMap: Record<string, string>;
   setAudioMap: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  musicTrackId: string;
+  setMusicTrackId: React.Dispatch<React.SetStateAction<string>>;
+  /** Id en la biblioteca si el cuento activo ya se guardó (null si todavía no). */
+  savedId: string | null;
+  setSavedId: React.Dispatch<React.SetStateAction<string | null>>;
   hydrated: boolean;
   /** Limpia el cuento activo en memoria (llamar SIEMPRE al cerrar sesión: el Provider vive a nivel de toda
    * la app, así que sin esto el cuento de un usuario quedaría visible tras el logout en el mismo dispositivo). */
@@ -53,6 +59,10 @@ const StoryContext = React.createContext<StoryContextType>({
   setVoiceId: noop,
   audioMap: {},
   setAudioMap: noop,
+  musicTrackId: DEFAULT_TRACK_ID,
+  setMusicTrackId: noop,
+  savedId: null,
+  setSavedId: noop,
   hydrated: false,
   clearStory: noop,
 });
@@ -65,6 +75,8 @@ export function StoryProvider({ children }: { children: React.ReactNode }) {
   const [illustrations, setIllustrations] = React.useState<IllustrationResult[]>([]);
   const [voiceId, setVoiceId] = React.useState('shimmer');
   const [audioMap, setAudioMap] = React.useState<Record<string, string>>({});
+  const [musicTrackId, setMusicTrackId] = React.useState(DEFAULT_TRACK_ID);
+  const [savedId, setSavedId] = React.useState<string | null>(null);
   const [hydrated, setHydrated] = React.useState(false);
 
   // Hidratar desde AsyncStorage una sola vez, al montar el Provider (envuelve toda la app en _layout.tsx).
@@ -85,6 +97,8 @@ export function StoryProvider({ children }: { children: React.ReactNode }) {
         } else if (session.audioUri && session.voiceId) {
           setAudioMap(sanitizeAudioMap({ [session.voiceId]: session.audioUri }));
         }
+        if (session.musicTrackId) setMusicTrackId(session.musicTrackId);
+        setSavedId(session.savedId ?? null);
         const plan = buildIllustrationPlan(session.story);
         setIllustrationPlan(plan);
         const imgs = session.images || [];
@@ -105,11 +119,13 @@ export function StoryProvider({ children }: { children: React.ReactNode }) {
       images: illustrations.map((item) => item.uri).filter(Boolean) as string[],
       voiceId,
       audioMap: Object.keys(audioMap).length ? audioMap : undefined,
+      musicTrackId,
+      savedId: savedId ?? undefined,
       meta,
       createdAt: new Date().toISOString(),
     };
     saveCurrentSession(session).catch(() => {});
-  }, [hydrated, storyText, illustrations, voiceId, audioMap, meta, theme]);
+  }, [hydrated, storyText, illustrations, voiceId, audioMap, musicTrackId, savedId, meta, theme]);
 
   const clearStory = React.useCallback(() => {
     setStoryText('');
@@ -119,6 +135,8 @@ export function StoryProvider({ children }: { children: React.ReactNode }) {
     setIllustrations([]);
     setVoiceId('shimmer');
     setAudioMap({});
+    setMusicTrackId(DEFAULT_TRACK_ID);
+    setSavedId(null);
   }, []);
 
   const value = React.useMemo<StoryContextType>(() => ({
@@ -129,9 +147,11 @@ export function StoryProvider({ children }: { children: React.ReactNode }) {
     illustrations, setIllustrations,
     voiceId, setVoiceId,
     audioMap, setAudioMap,
+    musicTrackId, setMusicTrackId,
+    savedId, setSavedId,
     hydrated,
     clearStory,
-  }), [storyText, meta, theme, illustrationPlan, illustrations, voiceId, audioMap, hydrated, clearStory]);
+  }), [storyText, meta, theme, illustrationPlan, illustrations, voiceId, audioMap, musicTrackId, savedId, hydrated, clearStory]);
 
   return <StoryContext.Provider value={value}>{children}</StoryContext.Provider>;
 }

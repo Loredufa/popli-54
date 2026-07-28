@@ -14,12 +14,41 @@ const TRACKS: Track[] = [
   { id: 'fun-time', title: 'Zambolino - Fun Time', file: require('../../assets/audio/Zambolino - Fun Time (freetouse.com).mp3') },
 ];
 
-export function useMusicPlayer() {
+export const DEFAULT_TRACK_ID = TRACKS[0].id;
+
+export function trackTitle(id?: string | null) {
+  return TRACKS.find((t) => t.id === id)?.title ?? '';
+}
+
+type MusicPlayerOptions = {
+  /** Track con el que arranca el hook (p. ej. el guardado en la sesión del cuento). */
+  initialTrackId?: string | null;
+  /** Se llama cada vez que cambia el track, para poder persistir la elección. */
+  onTrackChange?: (trackId: string) => void;
+};
+
+export function useMusicPlayer(options: MusicPlayerOptions = {}) {
+  const { initialTrackId, onTrackChange } = options;
   const [sound, setSound] = React.useState<Audio.Sound | null>(null);
-  const [currentTrackId, setCurrentTrackId] = React.useState<string>(TRACKS[0].id);
+  const [currentTrackId, setCurrentTrackId] = React.useState<string>(
+    () => (initialTrackId && TRACKS.some((t) => t.id === initialTrackId) ? initialTrackId : TRACKS[0].id),
+  );
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [volume, setVolume] = React.useState(0.6);
   const isChanging = React.useRef(false);
+
+  // `initialTrackId` puede llegar tarde (la sesión se hidrata async): mientras el usuario no haya
+  // elegido nada a mano, seguimos el valor externo. Después manda la elección local.
+  const userPickedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (userPickedRef.current) return;
+    if (!initialTrackId) return;
+    if (!TRACKS.some((t) => t.id === initialTrackId)) return;
+    setCurrentTrackId((prev) => (prev === initialTrackId ? prev : initialTrackId));
+  }, [initialTrackId]);
+
+  const onTrackChangeRef = React.useRef(onTrackChange);
+  React.useEffect(() => { onTrackChangeRef.current = onTrackChange; }, [onTrackChange]);
 
   const currentTrack = React.useMemo(
     () => TRACKS.find((t) => t.id === currentTrackId) ?? TRACKS[0],
@@ -47,6 +76,7 @@ export function useMusicPlayer() {
       });
       setSound(newSound);
       setCurrentTrackId(track.id);
+      onTrackChangeRef.current?.(track.id);
     } finally {
       isChanging.current = false;
     }
@@ -117,7 +147,10 @@ export function useMusicPlayer() {
     play,
     pause,
     setVolume: setVolumeSafe,
-    setTrack: (id: string) => play(id),
+    setTrack: (id: string) => {
+      userPickedRef.current = true;
+      return play(id);
+    },
   };
 }
 

@@ -14,10 +14,11 @@ import {
   loadVoicePreference,
   saveVoicePreference,
   loadNamedVoices,
-  deleteNamedVoice,
+  deleteNamedVoiceCascade,
   MAX_NAMED_VOICES,
   type NamedVoiceData,
 } from '../src/lib/voicePrefs';
+import { useStory } from '../src/story/StoryContext';
 import { useLanguage } from '../src/i18n/LanguageContext';
 import { AppLocale } from '../src/i18n/translations';
 
@@ -32,6 +33,7 @@ export default function SettingsScreen() {
     const { user, logout } = useAuth();
     const { t, appLocale, setAppLocale } = useLanguage();
     const menuItems = buildMenuItems(t);
+    const { voiceId, setVoiceId, audioMap, setAudioMap } = useStory();
 
     const [voices, setVoices] = React.useState<VoiceOption[]>([]);
     const [selectedVoice, setSelectedVoice] = React.useState<string>('alloy');
@@ -117,20 +119,30 @@ export default function SettingsScreen() {
     }, []);
 
     const handleDeleteNamedVoice = React.useCallback((v: NamedVoiceData) => {
-      Alert.alert('Borrar voz', `¿Borrar la voz "${v.label}"? No se puede deshacer.`, [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Borrar', style: 'destructive', onPress: async () => {
-            await deleteNamedVoice(v.id);
-            setNamedVoices((prev) => prev.filter((x) => x.id !== v.id));
-            if (selectedVoice === `custom:${v.id}`) {
-              setSelectedVoice('alloy');
-              await saveVoicePreference('alloy');
+      Alert.alert(
+        'Borrar grabación',
+        `¿Borrar la voz "${v.label}"? Vas a poder volver a grabarla cuando quieras.`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Borrar', style: 'destructive', onPress: async () => {
+              const composedId = `custom:${v.id}`;
+              // La cascada limpia tambien la narracion ya generada con esa voz y la preferencia
+              // global; el estado en memoria (local y del cuento activo) lo sincronizamos aca.
+              const result = await deleteNamedVoiceCascade(v.id, {
+                // Si la voz borrada estaba activa en cualquiera de los dos lados, hay que resetear.
+                currentVoiceId: selectedVoice === composedId || voiceId === composedId ? composedId : selectedVoice,
+                audioMap,
+              });
+              setNamedVoices((prev) => prev.filter((x) => x.id !== v.id));
+              setAudioMap(result.audioMap);
+              if (selectedVoice === composedId) setSelectedVoice(result.nextVoiceId);
+              if (voiceId === composedId) setVoiceId(result.nextVoiceId);
             }
-          }
-        },
-      ]);
-    }, [selectedVoice]);
+          },
+        ],
+      );
+    }, [selectedVoice, audioMap, setAudioMap, voiceId, setVoiceId]);
 
     return (
         <View style={{ flex: 1, backgroundColor: THEME.bgTop }}>
