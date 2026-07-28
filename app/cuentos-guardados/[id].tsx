@@ -11,7 +11,7 @@ import MusicBar from '../../src/components/MusicBar';
 import SavedStoryPlayer, { StoryIllustration } from '../../src/components/SavedStoryPlayer';
 import { buildMenuItems } from '../../src/constants/menu';
 import { useLanguage } from '../../src/i18n/LanguageContext';
-import { useMusicPlayer } from '../../src/lib/musicPlayer';
+import { usePlayback } from '../../src/story/PlaybackContext';
 import { clearCurrentSession } from '../../src/lib/storage';
 import { loadStoryBundle, type LoadedStory } from '../../src/lib/storyLibrary';
 import { useStory } from '../../src/story/StoryContext';
@@ -28,8 +28,16 @@ export default function SavedStoryScreen() {
   const [loading, setLoading] = React.useState(true);
   const [loggingOut, setLoggingOut] = React.useState(false);
 
+  // Un solo reproductor de musica en toda la app (PlaybackProvider). Si esta pantalla
+  // creara el suyo, sonarian dos pistas encimadas.
+  const { music } = usePlayback();
+
   // La musica arranca en el track con el que se guardo el cuento, no en el default.
-  const music = useMusicPlayer({ initialTrackId: bundle?.manifest.musicTrackId });
+  const savedTrackId = bundle?.manifest.musicTrackId;
+  const selectTrack = music.selectTrack;
+  React.useEffect(() => {
+    if (savedTrackId) selectTrack(savedTrackId);
+  }, [savedTrackId, selectTrack]);
 
   React.useEffect(() => {
     let alive = true;
@@ -44,8 +52,10 @@ export default function SavedStoryScreen() {
     return () => { alive = false; };
   }, [id]);
 
-  // Salir de la pantalla no deja la musica sonando: useMusicPlayer descarga el sonido al
-  // desmontarse (ver el cleanup de `unload` en musicPlayer.ts).
+  // El reproductor es global (PlaybackProvider) y ya no se desmonta con la pantalla, asi
+  // que hay que parar la musica a mano al salir de un cuento guardado.
+  const pauseMusic = music.pause;
+  React.useEffect(() => () => { pauseMusic(); }, [pauseMusic]);
 
   const greetingName = React.useMemo(() => {
     if (!user) return '';

@@ -3,6 +3,7 @@ import * as React from 'react';
 import { saveCurrentSession, loadCurrentSession, type StorySession } from '../lib/storage';
 import { DEFAULT_TRACK_ID } from '../lib/musicPlayer';
 import { loadVoicePreference } from '../lib/voicePrefs';
+import { pruneMissingAssets, nullifyMissingAssets } from '../lib/localAssets';
 import { buildIllustrationPlan } from './plan';
 import type { IllustrationPlan, IllustrationResult } from './types';
 
@@ -92,10 +93,20 @@ export function StoryProvider({ children }: { children: React.ReactNode }) {
         if (session.meta) setMeta(session.meta);
         if (session.title) setTheme(session.title);
         if (session.voiceId) setVoiceId(session.voiceId);
-        if (session.audioMap) {
-          setAudioMap(sanitizeAudioMap(session.audioMap));
-        } else if (session.audioUri && session.voiceId) {
-          setAudioMap(sanitizeAudioMap({ [session.voiceId]: session.audioUri }));
+        // El audio narrado vive en `cacheDirectory` pero su URI se guarda en AsyncStorage:
+        // si Android purgo el cache, el mapa apunta a archivos que ya no estan. Los sacamos
+        // acá para que la UI no muestre "Narración lista" sobre un audio fantasma.
+        const restoredMap = session.audioMap
+          ? sanitizeAudioMap(session.audioMap)
+          : (session.audioUri && session.voiceId)
+            ? sanitizeAudioMap({ [session.voiceId]: session.audioUri })
+            : null;
+        if (restoredMap) {
+          setAudioMap(restoredMap);
+          const onDisk = await pruneMissingAssets(restoredMap);
+          if (alive && Object.keys(onDisk).length !== Object.keys(restoredMap).length) {
+            setAudioMap(onDisk);
+          }
         }
         if (session.musicTrackId) setMusicTrackId(session.musicTrackId);
         setSavedId(session.savedId ?? null);
@@ -103,6 +114,12 @@ export function StoryProvider({ children }: { children: React.ReactNode }) {
         setIllustrationPlan(plan);
         const imgs = session.images || [];
         setIllustrations(plan.map((item, idx) => ({ ...item, uri: imgs[idx] ?? null })));
+        // Mismo problema que el audio: la ilustracion pudo desaparecer del disco. Si no la
+        // anulamos, `<Image>` queda en blanco sin que la pantalla ofrezca regenerarla.
+        const imgsOnDisk = await nullifyMissingAssets(imgs);
+        if (alive && imgsOnDisk.some((uri, idx) => uri !== (imgs[idx] ?? null))) {
+          setIllustrations(plan.map((item, idx) => ({ ...item, uri: imgsOnDisk[idx] ?? null })));
+        }
       }
       if (alive) setHydrated(true);
     })();

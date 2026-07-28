@@ -49,18 +49,38 @@ export type StoryManifest = {
   pdfFile?: string | null;
 };
 
-/** Entrada del indice en AsyncStorage: lo justo para pintar la lista sin abrir cada carpeta. */
+/** Entrada del indice, ya resuelta a rutas absolutas para el contenedor ACTUAL de la app. */
 export type SavedStoryEntry = {
   id: string;
   title: string;
   slug: string;
+  /** Nombre de la carpeta relativo a `ROOT` (`mi-cuento-123/`). Es lo unico que se persiste. */
+  folder: string;
+  /** Absoluta, derivada de `folder` al leer el indice. NO se persiste. */
   dir: string;
   createdAt: string;
   updatedAt: string;
+  /** Portada relativa a la carpeta del cuento (`ilustraciones/01-intro.png`). */
+  coverFile?: string | null;
+  /** Absoluta, derivada de `coverFile` al leer el indice. NO se persiste. */
   coverUri?: string | null;
   hasAudio: boolean;
   hasPdf: boolean;
   metaSummary?: { age_range?: string; skill?: string; tone?: string };
+};
+
+/**
+ * Lo que realmente se escribe en AsyncStorage: SIN rutas absolutas.
+ *
+ * En iOS el path del contenedor lleva un UUID que el sistema regenera en cada actualizacion de
+ * la app, asi que una ruta absoluta guardada hoy apunta a la nada manana y la biblioteca entera
+ * se ve vacia -con los archivos intactos en la carpeta nueva-. `dir` y `coverUri` quedan
+ * declarados como opcionales solo para poder leer los indices viejos y migrarlos.
+ */
+type StoredStoryEntry = Omit<SavedStoryEntry, 'dir' | 'coverUri' | 'folder'> & {
+  folder?: string;
+  dir?: string;
+  coverUri?: string | null;
 };
 
 /** Cuento guardado ya resuelto a URIs absolutas, listo para reproducir. */
@@ -170,19 +190,55 @@ function audioExtension(uri: string) {
 
 /* ------------------------------- indice ------------------------------ */
 
+/** `.../cuentos/mi-cuento-123/` -> `mi-cuento-123/`. Sirve para cualquier prefijo absoluto,
+ * incluso uno de un contenedor iOS viejo que ya no existe. */
+function folderFromDir(dir?: string | null): string {
+  if (!dir) return '';
+  const trimmed = dir.replace(/\/+$/, '');
+  const name = trimmed.slice(trimmed.lastIndexOf('/') + 1);
+  return name ? `${name}/` : '';
+}
+
+/** Recupera la portada relativa de un indice viejo, que la guardaba absoluta. */
+function coverFileFromUri(coverUri?: string | null, dir?: string | null): string | null {
+  if (!coverUri) return null;
+  if (dir && coverUri.startsWith(dir)) return coverUri.slice(dir.length) || null;
+  // El prefijo no coincide (contenedor distinto): cortamos por la subcarpeta conocida.
+  const idx = coverUri.indexOf('ilustraciones/');
+  return idx >= 0 ? coverUri.slice(idx) : null;
+}
+
+/** Reconstruye las rutas absolutas contra el `ROOT` de ESTA ejecucion. */
+function hydrateEntry(stored: StoredStoryEntry): SavedStoryEntry {
+  const folder = stored.folder || folderFromDir(stored.dir);
+  const dir = `${ROOT}${folder}`;
+  const coverFile = stored.coverFile ?? coverFileFromUri(stored.coverUri, stored.dir);
+  const { coverUri: _legacyCover, ...rest } = stored;
+  return {
+    ...rest,
+    folder,
+    dir,
+    coverFile,
+    coverUri: coverFile ? `${dir}${coverFile}` : null,
+  };
+}
+
 async function readIndex(): Promise<SavedStoryEntry[]> {
   const raw = await AsyncStorage.getItem(LIBRARY_KEY);
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as SavedStoryEntry[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    // Se descartan las entradas sin carpeta derivable: sin eso no hay cuento que abrir.
+    return (parsed as StoredStoryEntry[]).map(hydrateEntry).filter((e) => Boolean(e.folder));
   } catch {
     return [];
   }
 }
 
 async function writeIndex(entries: SavedStoryEntry[]) {
-  await AsyncStorage.setItem(LIBRARY_KEY, JSON.stringify(entries));
+  const portable: StoredStoryEntry[] = entries.map(({ dir: _dir, coverUri: _coverUri, ...rest }) => rest);
+  await AsyncStorage.setItem(LIBRARY_KEY, JSON.stringify(portable));
 }
 
 async function readManifest(dir: string): Promise<StoryManifest | null> {
@@ -250,7 +306,8 @@ export async function saveStoryBundle(input: SaveStoryInput): Promise<SavedStory
   const title = input.title?.trim() || DEFAULT_STORY_TITLE;
   const id = previous?.id ?? String(Date.now());
   const slug = previous?.slug ?? slugify(title);
-  const dir = previous?.dir ?? `${ROOT}${slug}-${id}/`;
+  const folder = previous?.folder || `${slug}-${id}/`;
+  const dir = `${ROOT}${folder}`;
   const createdAt = previous?.createdAt ?? new Date().toISOString();
   const updatedAt = new Date().toISOString();
 
@@ -325,14 +382,17 @@ export async function saveStoryBundle(input: SaveStoryInput): Promise<SavedStory
     };
     await FileSystem.writeAsStringAsync(`${dir}cuento.json`, JSON.stringify(manifest));
 
+    const coverFile = illustrations.length ? illustrations[0].file : null;
     const entry: SavedStoryEntry = {
       id,
       title,
       slug,
+      folder,
       dir,
       createdAt,
       updatedAt,
-      coverUri: illustrations.length ? `${dir}${illustrations[0].file}` : null,
+      coverFile,
+      coverUri: coverFile ? `${dir}${coverFile}` : null,
       hasAudio: audio.length > 0,
       hasPdf: Boolean(pdfFile),
       metaSummary: input.meta

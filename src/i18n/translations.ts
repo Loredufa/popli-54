@@ -10,6 +10,7 @@ export type TranslationKeys = {
   settings_change_password: string;
   settings_listen_demo: string;
   settings_playing: string;
+  settings_stop_preview: string;
   // Maker screen — card/section titles
   maker_customization_title: string;
   maker_your_story_title: string;
@@ -75,6 +76,7 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     settings_change_password: 'Cambiar Contraseña',
     settings_listen_demo: 'Escuchar demo',
     settings_playing: 'Reproduciendo...',
+    settings_stop_preview: 'Detener',
     maker_customization_title: 'Personalización',
     maker_your_story_title: 'Tu cuento',
     maker_central_theme_label: 'Tema central',
@@ -129,6 +131,7 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     settings_change_password: 'Change Password',
     settings_listen_demo: 'Listen to demo',
     settings_playing: 'Playing...',
+    settings_stop_preview: 'Stop',
     maker_customization_title: 'Customization',
     maker_your_story_title: 'Your story',
     maker_central_theme_label: 'Central theme',
@@ -183,6 +186,7 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     settings_change_password: 'Alterar Senha',
     settings_listen_demo: 'Ouvir demo',
     settings_playing: 'Reproduzindo...',
+    settings_stop_preview: 'Parar',
     maker_customization_title: 'Personalização',
     maker_your_story_title: 'Sua história',
     maker_central_theme_label: 'Tema central',
@@ -237,6 +241,7 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     settings_change_password: 'パスワードを変更',
     settings_listen_demo: 'デモを聴く',
     settings_playing: '再生中...',
+    settings_stop_preview: '停止',
     maker_customization_title: 'カスタマイズ',
     maker_your_story_title: 'あなたのお話',
     maker_central_theme_label: 'テーマ',

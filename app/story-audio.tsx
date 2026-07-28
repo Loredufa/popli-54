@@ -13,10 +13,11 @@ import NarratorPicker, { type NarratorVoice } from '../src/components/NarratorPi
 import StoryReader from '../src/components/StoryReader';
 import { buildMenuItems } from '../src/constants/menu';
 import { useLanguage } from '../src/i18n/LanguageContext';
-import { useMusicPlayer } from '../src/lib/musicPlayer';
+import { usePlayback } from '../src/story/PlaybackContext';
 import { clearCurrentSession } from '../src/lib/storage';
 import { saveStoryBundle } from '../src/lib/storyLibrary';
 import { downloadNarrationToGallery, fetchVoices, fetchVoicePreview, type VoiceOption } from '../src/lib/ttsClient';
+import { localAssetExists } from '../src/lib/localAssets';
 import {
   deleteNamedVoiceCascade,
   loadVoicePreference,
@@ -40,12 +41,13 @@ export default function StoryAudioScreen() {
   const {
     storyText, meta, theme, illustrations,
     voiceId, setVoiceId, audioMap, setAudioMap,
-    musicTrackId, setMusicTrackId, savedId, setSavedId,
+    savedId, setSavedId,
     hydrated, clearStory,
   } = useStory();
 
   const [loggingOut, setLoggingOut] = React.useState(false);
-  const music = useMusicPlayer({ initialTrackId: musicTrackId, onTrackChange: setMusicTrackId });
+  // La musica y la narracion viven en PlaybackProvider: siguen sonando al navegar.
+  const { music } = usePlayback();
   const [audioLoading, setAudioLoading] = React.useState(false);
   const [savingStory, setSavingStory] = React.useState(false);
   const [voices, setVoices] = React.useState<VoiceOption[]>([]);
@@ -54,6 +56,9 @@ export default function StoryAudioScreen() {
   const [namedVoices, setNamedVoices] = React.useState<NamedVoiceData[]>([]);
   const previewSoundRef = React.useRef<any>(null);
   const previewObjectUrlRef = React.useRef<string | null>(null);
+  // Descarta muestras que llegan tarde: pedirle el preview de una voz fija al backend
+  // tarda, y en el medio el usuario puede haber frenado o cambiado de voz.
+  const previewRunIdRef = React.useRef(0);
 
   const menuItems = buildMenuItems(t);
   const greetingName = React.useMemo(() => {
@@ -205,7 +210,17 @@ export default function StoryAudioScreen() {
       return;
     }
     const uri = audioMap[voiceId] || null;
-    if (!uri) {
+    // El archivo pudo haber sido purgado del cache: si ya no esta, sacamos la entrada muerta
+    // para que la pantalla vuelva a ofrecer generar la narracion.
+    if (!uri || !(await localAssetExists(uri))) {
+      if (uri) {
+        setAudioMap((prev) => {
+          if (prev[voiceId] !== uri) return prev;
+          const next = { ...prev };
+          delete next[voiceId];
+          return next;
+        });
+      }
       Alert.alert(t.alert_no_audio_title, t.alert_no_audio_msg);
       return;
     }
@@ -223,25 +238,50 @@ export default function StoryAudioScreen() {
     }
   }, [audioMap, voiceId, theme, t]);
 
+  const stopPreview = React.useCallback(async () => {
+    // El id sube antes de tocar el audio para que el botón vuelva a "Demo" al instante,
+    // sin esperar a que expo-av termine de descargar el sonido.
+    previewRunIdRef.current += 1;
+    setPreviewing(null);
+    const sound = previewSoundRef.current;
+    previewSoundRef.current = null;
+    if (sound) {
+      await sound.stopAsync().catch(() => {});
+      await sound.unloadAsync().catch(() => {});
+    }
+    if (previewObjectUrlRef.current && Platform.OS === 'web') {
+      URL.revokeObjectURL(previewObjectUrlRef.current);
+      previewObjectUrlRef.current = null;
+    }
+  }, []);
+
   const handlePreviewVoice = React.useCallback(async (id: string) => {
+    // El mismo botón alterna: si esta voz ya está sonando, lo que hace es frenarla.
+    if (previewing === id) {
+      await stopPreview();
+      return;
+    }
+    // Cambiar de voz también corta la anterior, si no suenan las dos encimadas.
+    await stopPreview();
+
+    const runId = ++previewRunIdRef.current;
     try {
       setPreviewing(id);
       const customEntry = voiceList.find((v) => v.id === id && v.isCustom);
       const { Audio } = await import('expo-av');
+      // Las voces fijas piden la muestra al backend: eso tarda, y en el medio el
+      // usuario puede haber tocado "Detener" o elegido otra voz.
       const uri = customEntry?.referenceAudioUri || (await fetchVoicePreview(id));
-      if (previewSoundRef.current) {
-        await previewSoundRef.current.stopAsync().catch(() => {});
-        await previewSoundRef.current.unloadAsync().catch(() => {});
-        previewSoundRef.current = null;
-      }
-      if (previewObjectUrlRef.current && Platform.OS === 'web') {
-        URL.revokeObjectURL(previewObjectUrlRef.current);
-        previewObjectUrlRef.current = null;
-      }
+      if (runId !== previewRunIdRef.current) return;
+
       if (Platform.OS === 'web' && uri.startsWith('blob:')) {
         previewObjectUrlRef.current = uri;
       }
       const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true });
+      if (runId !== previewRunIdRef.current) {
+        await sound.unloadAsync().catch(() => {});
+        return;
+      }
       previewSoundRef.current = sound;
       sound.setOnPlaybackStatusUpdate((status) => {
         if (!status.isLoaded) return;
@@ -252,14 +292,15 @@ export default function StoryAudioScreen() {
             URL.revokeObjectURL(previewObjectUrlRef.current);
             previewObjectUrlRef.current = null;
           }
-          setPreviewing(null);
+          setPreviewing((current) => (current === id ? null : current));
         }
       });
     } catch (e: any) {
+      if (runId !== previewRunIdRef.current) return;
       Alert.alert('No se pudo reproducir la voz', e?.message || 'Intentalo de nuevo.');
       setPreviewing(null);
     }
-  }, [voiceList]);
+  }, [voiceList, previewing, stopPreview]);
 
   const handleDeleteVoice = React.useCallback((voice: NarratorVoice) => {
     const namedId = voice.id.replace(/^custom:/, '');
@@ -363,17 +404,7 @@ export default function StoryAudioScreen() {
               <Text style={{ color: THEME.textDim, marginBottom: 6, fontWeight: '700' }}>Tu cuento</Text>
               <MusicBar player={music} theme={THEME} />
               <View style={{ height: 12 }} />
-              <StoryReader
-                text={storyText}
-                locale="es-AR"
-                voiceLabel={voiceLabel}
-                voiceId={voiceId}
-                referenceAudioUri={selectedVoiceEntry?.referenceAudioUri}
-                audioUri={currentAudioUri}
-                onNarrationReady={(voice, uri) => setAudioMap((prev) => ({ ...prev, [voice]: uri }))}
-                onNarrationStart={() => { if (!music.isPlaying) music.play(); }}
-                onNarrationStop={() => { if (music.isPlaying) music.pause(); }}
-              />
+              <StoryReader locale="es-AR" voiceLabel={voiceLabel} />
               <View style={{ marginTop: 12, padding: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: THEME.border }}>
                 <Text style={{ color: THEME.text, fontWeight: '700', marginBottom: 8 }}>Narrador</Text>
                 <Pressable
@@ -390,7 +421,7 @@ export default function StoryAudioScreen() {
                   loading={loadingVoices}
                   loadingLabel={t.settings_loading_voices}
                   previewingId={previewing}
-                  previewingLabel={t.settings_playing}
+                  previewingLabel={t.settings_stop_preview}
                   onSelect={(id) => {
                     setVoiceId(id);
                     saveVoicePreference(id).catch(() => {});

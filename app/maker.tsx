@@ -12,6 +12,8 @@ import {
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAuth } from '../src/auth/AuthProvider';
 import AppNavbar, { type NavbarMenuItem } from '../src/components/AppNavbar';
+import NarrationControls from '../src/components/NarrationControls';
+import { useRotatingMessage } from '../src/lib/useRotatingMessage';
 import { clearCurrentSession } from '../src/lib/storage';
 import {
   DEFAULT_STORY_TITLE,
@@ -29,6 +31,14 @@ import type {
 } from '../src/story/types';
 import { sceneKeyForSlot } from '../src/story/types';
 import { buildIllustrationPlan, splitStoryParagraphs } from '../src/story/plan';
+import { stripNarrationCues } from '../src/story/text';
+
+const ILLUSTRATION_WAIT_MESSAGES = [
+  'Generando ilustracion...',
+  'Esto puede tardar unos segundos...',
+  'Dibujando la escena...',
+  'Ya casi esta...',
+];
 
 const HOME_ROUTE = '/(tabs)/index' as Href;
 const LOGIN_ROUTE = '/login' as Href;
@@ -396,19 +406,24 @@ export default function MakerScreen() {
     </ScrollView>
   ), [skill]);
 
-  const storyParagraphs = React.useMemo(() => splitStoryParagraphs(storyText), [storyText]);
+  // `storyText` se guarda CRUDO porque las marcas "(pausa)" le dicen al worker de TTS
+  // dónde poner los silencios. Todo lo que el usuario ve o se lleva (pantalla, PDF,
+  // texto compartido, cuento guardado) usa esta versión sin marcas.
+  const displayText = React.useMemo(() => stripNarrationCues(storyText), [storyText]);
+
+  const storyParagraphs = React.useMemo(() => splitStoryParagraphs(displayText), [displayText]);
 
   const paragraphs = React.useMemo(() => {
-    if (!storyText.trim()) return [] as string[];
-    return storyParagraphs.length ? storyParagraphs : [storyText.trim()];
-  }, [storyParagraphs, storyText]);
+    if (!displayText.trim()) return [] as string[];
+    return storyParagraphs.length ? storyParagraphs : [displayText.trim()];
+  }, [storyParagraphs, displayText]);
 
   const planWithResults = React.useMemo(() => {
     if (!storyText) return [] as IllustrationResult[];
-    const basePlan = illustrationPlan.length ? illustrationPlan : buildIllustrationPlan(storyText);
+    const basePlan = illustrationPlan.length ? illustrationPlan : buildIllustrationPlan(displayText);
     const bySlot = new Map(illustrations.map((item) => [item.slot, item]));
     return basePlan.map((item) => bySlot.get(item.slot) ?? { ...item, uri: null });
-  }, [storyText, illustrationPlan, illustrations]);
+  }, [storyText, displayText, illustrationPlan, illustrations]);
 
   const groupedIllustrations = React.useMemo(() => {
     const groups = new Map<number, { before: IllustrationResult[]; after: IllustrationResult[] }>();
@@ -435,6 +450,16 @@ export default function MakerScreen() {
     return hasIllustrations ? t.btn_reillustrate : t.btn_illustrate;
   }, [imgLoading, hasIllustrations, t]);
 
+  // Generar cuento e ilustraciones tarda; un texto fijo por minutos parece que se colgó.
+  const illustrationWaitMessage = useRotatingMessage(ILLUSTRATION_WAIT_MESSAGES, imgLoading);
+  const storyWaitMessage = useRotatingMessage(
+    React.useMemo(
+      () => [t.story_generating_message, 'Esto puede tardar unos segundos...', 'Buscando las palabras justas...'],
+      [t.story_generating_message],
+    ),
+    loading,
+  );
+
   const renderIllustrationItem = (item: IllustrationResult, key: string) => {
     if (!item.uri) {
       const isSceneLoading = illustrationLoading[item.slot];
@@ -447,7 +472,7 @@ export default function MakerScreen() {
               <Feather name='image' size={24} color={THEME.accent} style={{ marginBottom: 8 }} />
             )}
             <Text style={{ color: THEME.textDim, textAlign: 'center' }}>
-              {isSceneLoading ? 'Generando ilustracion...' : `Ilustracion pendiente: ${item.label}`}
+              {isSceneLoading ? illustrationWaitMessage : `Ilustracion pendiente: ${item.label}`}
             </Text>
           </View>
         </View>
@@ -495,7 +520,7 @@ export default function MakerScreen() {
       }
     }
 
-    const paragraphSource = paragraphs.length ? paragraphs : (storyText ? [storyText.trim()] : []);
+    const paragraphSource = paragraphs.length ? paragraphs : (displayText ? [displayText.trim()] : []);
     const paragraphBlocks = paragraphSource
       .map((block) => `<p class="paragraph">${escapeHtml(toImprenta(block))}</p>`);
 
@@ -629,7 +654,7 @@ export default function MakerScreen() {
   ${pages.join('\n')}
 </body>
 </html>`;
-  }, [paragraphs, planWithResults, theme, meta, storyText]);
+  }, [paragraphs, displayText, planWithResults, theme, meta, storyText]);
 
   const exportStoryPdf = React.useCallback(async () => {
     if (!storyText?.trim()) throw new Error('No hay cuento para exportar.');
@@ -705,7 +730,7 @@ export default function MakerScreen() {
       const pdfUri = await exportStoryPdf();
       const baseTitle = theme?.trim() || DEFAULT_STORY_TITLE;
       const dialogTitle = `${baseTitle} ${BRAND_SUFFIX}`;
-      const shareMessage = `${dialogTitle}\n\n${storyText}`;
+      const shareMessage = `${dialogTitle}\n\n${displayText}`;
       if (Platform.OS === 'web' || !pdfUri) {
         Alert.alert('Abre el PDF', 'Se abrio la opcion del navegador para guardar/imprimir tu cuento en PDF.');
         return;
@@ -722,7 +747,7 @@ export default function MakerScreen() {
     } catch (e: any) {
       Alert.alert('No se pudo compartir', e?.message || 'Error desconocido');
     }
-  }, [storyText, exportStoryPdf, hasIllustrations, theme, exportingPdf]);
+  }, [storyText, displayText, exportStoryPdf, hasIllustrations, theme, exportingPdf]);
 
   // Guardar = armar la carpeta del cuento en la biblioteca (texto, ilustraciones, PDF, musica y
   // narracion ya generada). Compartir es otra cosa y vive en handleShare: antes este boton hacia
@@ -743,7 +768,9 @@ export default function MakerScreen() {
       const entry = await saveStoryBundle({
         existingId: savedId,
         title: theme?.trim() || DEFAULT_STORY_TITLE,
-        story: storyText,
+        // El cuento guardado no se vuelve a narrar (reproduce el audio ya generado),
+        // así que se guarda sin las marcas de narración.
+        story: displayText,
         meta,
         illustrations: illustrations.map((item) => ({
           slot: item.slot,
@@ -772,7 +799,7 @@ export default function MakerScreen() {
     } finally {
       setSavingStory(false);
     }
-  }, [storyText, exportingPdf, savingStory, meta, illustrations, audioMap, musicTrackId, savedId, setSavedId, exportStoryPdf, theme]);
+  }, [storyText, displayText, exportingPdf, savingStory, meta, illustrations, audioMap, musicTrackId, savedId, setSavedId, exportStoryPdf, theme]);
 
   const onGenerate = React.useCallback(async () => {
     setLoading(true);
@@ -810,7 +837,7 @@ export default function MakerScreen() {
 
   const onIllustrate = React.useCallback(async () => {
     if (!storyText) { Alert.alert(t.alert_missing_story_title, t.alert_missing_story_msg); return; }
-    const plan = illustrationPlan.length ? illustrationPlan : buildIllustrationPlan(storyText);
+    const plan = illustrationPlan.length ? illustrationPlan : buildIllustrationPlan(displayText);
     setIllustrationPlan(plan);
     const effectiveTheme = theme || 'cuento infantil';
 
@@ -836,7 +863,7 @@ export default function MakerScreen() {
         story: `${sceneContext}
 
 Resumen del cuento:
-${storyText.slice(0, 900)}`,
+${displayText.slice(0, 900)}`,
         count: 1,
         scene_index: sceneKeyForSlot(scene.slot),
         plan: sharedPlan,
@@ -901,7 +928,7 @@ ${storyText.slice(0, 900)}`,
     } finally {
       setIllustrationLoading({ intro: false, conflict: false, resolution: false });
     }
-  }, [storyText, ageRange, theme, skill, characters, locale, illustrationPlan]);
+  }, [storyText, displayText, ageRange, theme, skill, characters, locale, illustrationPlan]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -1009,7 +1036,7 @@ ${storyText.slice(0, 900)}`,
             {loading ? (
               <View style={{ paddingVertical: 24, alignItems: 'center' }}>
                 <ActivityIndicator color={THEME.accent} size="large" />
-                <Text style={{ color: THEME.textDim, marginTop: 12 }}>{t.story_generating_message}</Text>
+                <Text style={{ color: THEME.textDim, marginTop: 12, textAlign: 'center' }}>{storyWaitMessage}</Text>
               </View>
             ) : storyText ? (
               <>
@@ -1025,6 +1052,29 @@ ${storyText.slice(0, 900)}`,
                       Toca "Ilustrar cuento" para generar tres escenas clave.
                     </Text>
                   ) : null}
+                </View>
+
+                {/* Controles de narración sobre el texto: el usuario puede seguir el
+                    cuento leyendo mientras escucha, sin volver a "Música y narrador". */}
+                <View
+                  style={{
+                    marginBottom: 16,
+                    padding: 12,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: THEME.border,
+                    backgroundColor: 'rgba(255,255,255,0.04)',
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+                    <Text style={{ color: THEME.text, fontWeight: '700', flex: 1 }} numberOfLines={1}>
+                      Escuchar el cuento
+                    </Text>
+                    <Pressable onPress={() => router.push('/story-audio')}>
+                      <Text style={{ color: THEME.accent, fontWeight: '700' }}>Voz y música</Text>
+                    </Pressable>
+                  </View>
+                  <NarrationControls hint="Podés seguir el cuento con la vista mientras se narra." />
                 </View>
 
                 <View>

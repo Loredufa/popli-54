@@ -25,6 +25,8 @@ type Props = {
   loading?: boolean;
   loadingLabel?: string;
   previewingId?: string | null;
+  /** Qué dice el botón mientras suena la muestra. Es una acción, no un estado: al
+   *  tocarlo frena, así que debería decir "Detener", no "Sonando...". */
   previewingLabel?: string;
   onSelect: (voiceId: string) => void;
   onPreview: (voiceId: string) => void;
@@ -39,7 +41,7 @@ export default function NarratorPicker({
   loading,
   loadingLabel = 'Cargando voces...',
   previewingId,
-  previewingLabel = 'Sonando...',
+  previewingLabel = 'Detener',
   onSelect,
   onPreview,
   onDelete,
@@ -113,8 +115,21 @@ export default function NarratorPicker({
                   </View>
                 </Pressable>
 
-                <Pressable onPress={() => onPreview(v.id)} style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
-                  <Text style={{ color: THEME.accent }}>
+                {/* El mismo botón alterna: mientras suena la muestra, frena. Así no hay
+                    que bancarse los 20-60s enteros de una grabación para probar otra. */}
+                <Pressable
+                  onPress={() => onPreview(v.id)}
+                  accessibilityLabel={
+                    previewingId === v.id ? `Detener la muestra de ${v.label}` : `Escuchar una muestra de ${v.label}`
+                  }
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4 }}
+                >
+                  <Feather
+                    name={previewingId === v.id ? 'square' : 'play'}
+                    size={14}
+                    color={previewingId === v.id ? '#ffc9a0' : THEME.accent}
+                  />
+                  <Text style={{ color: previewingId === v.id ? '#ffc9a0' : THEME.accent }}>
                     {previewingId === v.id ? previewingLabel : 'Demo'}
                   </Text>
                 </Pressable>

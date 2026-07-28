@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
+import { localAssetExists } from './localAssets';
 
 const PREF_KEY = 'cuentero_voice_id';
 const NAMED_VOICES_KEY = 'cuentero_named_voices';
@@ -41,7 +42,8 @@ async function ensureVoicesDir() {
   }
 }
 
-export async function loadNamedVoices(): Promise<NamedVoiceData[]> {
+/** Lo que hay en AsyncStorage, tal cual, sin chequear que las grabaciones existan. */
+async function readStoredVoices(): Promise<NamedVoiceData[]> {
   const raw = await AsyncStorage.getItem(NAMED_VOICES_KEY);
   if (!raw) return [];
   try {
@@ -52,16 +54,33 @@ export async function loadNamedVoices(): Promise<NamedVoiceData[]> {
   }
 }
 
+/**
+ * Voces grabadas USABLES: las que todavia tienen su archivo en disco.
+ *
+ * Una voz cuya grabacion desaparecio no sirve para nada -clonar con ella tira error al intentar
+ * leer el audio de referencia-, pero seguia apareciendo en la lista para siempre. El registro NO
+ * se borra: si el chequeo fallara por algo transitorio, la voz reaparece sola en el proximo
+ * arranque en vez de perderse una grabacion que la familia hizo a proposito.
+ */
+export async function loadNamedVoices(): Promise<NamedVoiceData[]> {
+  const stored = await readStoredVoices();
+  const usable = await Promise.all(stored.map((v) => localAssetExists(v.localUri)));
+  return stored.filter((_, idx) => usable[idx]);
+}
+
 export function voiceLabelExists(label: string, existing: NamedVoiceData[]): boolean {
   const norm = label.trim().toLowerCase();
   return existing.some((v) => v.label.trim().toLowerCase() === norm);
 }
 
 export async function saveNamedVoice(opts: { label: string; tempUri: string }): Promise<NamedVoiceData> {
-  const existing = await loadNamedVoices();
-  if (existing.length >= MAX_NAMED_VOICES) {
+  // El tope se cuenta sobre las voces USABLES (una sin archivo no le sirve a nadie), pero se
+  // escribe sobre la lista cruda: guardar una voz nueva no debe borrar registros de las otras.
+  const usable = await loadNamedVoices();
+  if (usable.length >= MAX_NAMED_VOICES) {
     throw new VoiceLimitError();
   }
+  const existing = await readStoredVoices();
   await ensureVoicesDir();
 
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -81,7 +100,8 @@ export async function saveNamedVoice(opts: { label: string; tempUri: string }): 
 }
 
 export async function deleteNamedVoice(id: string): Promise<void> {
-  const existing = await loadNamedVoices();
+  // Crudo a proposito: borrar una voz no puede llevarse puesto el registro de las otras.
+  const existing = await readStoredVoices();
   const target = existing.find((v) => v.id === id);
   const updated = existing.filter((v) => v.id !== id);
   await AsyncStorage.setItem(NAMED_VOICES_KEY, JSON.stringify(updated));

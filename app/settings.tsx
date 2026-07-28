@@ -85,38 +85,63 @@ export default function SettingsScreen() {
       await saveVoicePreference(id);
     }, []);
 
-    const handlePreview = React.useCallback(async (id: string) => {
-      try {
-        setPreviewing(id);
-        const uri = await fetchVoicePreview(id);
-        if (soundRef.current) {
-          await soundRef.current.stopAsync().catch(() => {});
-          await soundRef.current.unloadAsync().catch(() => {});
-        }
-        const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true });
-        soundRef.current = sound;
-      } catch (e) {
-        // ignore preview error
-      } finally {
-        setPreviewing(null);
+    // Descarta muestras que llegan tarde: pedir el preview de una voz fija al backend
+    // tarda, y en el medio el usuario puede haber frenado o elegido otra voz.
+    const previewRunIdRef = React.useRef(0);
+
+    const stopPreview = React.useCallback(async () => {
+      previewRunIdRef.current += 1;
+      setPreviewing(null);
+      const sound = soundRef.current;
+      soundRef.current = null;
+      if (sound) {
+        await sound.stopAsync().catch(() => {});
+        await sound.unloadAsync().catch(() => {});
       }
     }, []);
 
-    const handlePreviewNamedVoice = React.useCallback(async (v: NamedVoiceData) => {
-      try {
-        setPreviewing(v.id);
-        if (soundRef.current) {
-          await soundRef.current.stopAsync().catch(() => {});
-          await soundRef.current.unloadAsync().catch(() => {});
-        }
-        const { sound } = await Audio.Sound.createAsync({ uri: v.localUri }, { shouldPlay: true });
-        soundRef.current = sound;
-      } catch (e) {
-        // ignore preview error
-      } finally {
-        setPreviewing(null);
+    /** El mismo botón alterna: si esa muestra ya suena, la frena.
+     *  Antes el `finally` limpiaba `previewing` apenas arrancaba la reproducción, así que
+     *  el botón nunca llegaba a mostrar que estaba sonando y no había forma de cortarla. */
+    const playPreview = React.useCallback(async (key: string, resolveUri: () => Promise<string> | string) => {
+      if (previewing === key) {
+        await stopPreview();
+        return;
       }
-    }, []);
+      await stopPreview();
+      const runId = ++previewRunIdRef.current;
+      try {
+        setPreviewing(key);
+        const uri = await resolveUri();
+        if (runId !== previewRunIdRef.current) return;
+        const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true });
+        if (runId !== previewRunIdRef.current) {
+          await sound.unloadAsync().catch(() => {});
+          return;
+        }
+        soundRef.current = sound;
+        sound.setOnPlaybackStatusUpdate((status) => {
+          if (!status.isLoaded) return;
+          if (status.didJustFinish) {
+            sound.unloadAsync().catch(() => {});
+            soundRef.current = null;
+            setPreviewing((current) => (current === key ? null : current));
+          }
+        });
+      } catch {
+        if (runId === previewRunIdRef.current) setPreviewing(null);
+      }
+    }, [previewing, stopPreview]);
+
+    const handlePreview = React.useCallback(
+      (id: string) => playPreview(id, () => fetchVoicePreview(id)),
+      [playPreview],
+    );
+
+    const handlePreviewNamedVoice = React.useCallback(
+      (v: NamedVoiceData) => playPreview(v.id, () => v.localUri),
+      [playPreview],
+    );
 
     const handleDeleteNamedVoice = React.useCallback((v: NamedVoiceData) => {
       Alert.alert(
@@ -231,7 +256,7 @@ export default function SettingsScreen() {
                             }}
                           >
                             <Text style={{ color: THEME.text }}>
-                              {previewing === voice.id ? t.settings_playing : t.settings_listen_demo}
+                              {previewing === voice.id ? t.settings_stop_preview : t.settings_listen_demo}
                             </Text>
                           </TouchableOpacity>
                         </View>
@@ -251,7 +276,7 @@ export default function SettingsScreen() {
                         </TouchableOpacity>
                         <TouchableOpacity onPress={() => handlePreviewNamedVoice(v)} style={{ marginRight: 12 }}>
                           <Text style={{ color: THEME.text }}>
-                            {previewing === v.id ? t.settings_playing : t.settings_listen_demo}
+                            {previewing === v.id ? t.settings_stop_preview : t.settings_listen_demo}
                           </Text>
                         </TouchableOpacity>
                         <TouchableOpacity onPress={() => handleDeleteNamedVoice(v)}>

@@ -3,12 +3,16 @@ import React from 'react';
 import { AuthProvider } from '../src/auth/AuthProvider';
 import { LanguageProvider } from '../src/i18n/LanguageContext';
 import { StoryProvider } from '../src/story/StoryContext';
+import { PlaybackProvider } from '../src/story/PlaybackContext';
 
 export default function RootLayout() {
   return (
     <LanguageProvider>
       <AuthProvider>
         <StoryProvider>
+          {/* PlaybackProvider va ACÁ, por encima del <Stack>: si viviera dentro de una
+              pantalla se desmontaría al navegar y cortaría la narración a la mitad. */}
+          <PlaybackProvider>
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="login" options={{ presentation: 'card', headerShown: false }} />
@@ -18,6 +22,7 @@ export default function RootLayout() {
             <Stack.Screen name="record-voice" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="story-audio" options={{ presentation: 'card', headerShown: false }} />
           </Stack>
+          </PlaybackProvider>
         </StoryProvider>
       </AuthProvider>
     </LanguageProvider>

@@ -16,10 +16,6 @@ const TRACKS: Track[] = [
 
 export const DEFAULT_TRACK_ID = TRACKS[0].id;
 
-export function trackTitle(id?: string | null) {
-  return TRACKS.find((t) => t.id === id)?.title ?? '';
-}
-
 type MusicPlayerOptions = {
   /** Track con el que arranca el hook (p. ej. el guardado en la sesión del cuento). */
   initialTrackId?: string | null;
@@ -135,6 +131,25 @@ export function useMusicPlayer(options: MusicPlayerOptions = {}) {
     } catch { /* ignore */ }
   }, [sound]);
 
+  const setTrack = React.useCallback((id: string) => {
+    userPickedRef.current = true;
+    return play(id);
+  }, [play]);
+
+  /** Elige la pista SIN arrancar a sonar. Para restaurar la pista guardada de un cuento
+   *  al abrirlo: `setTrack` reproduce, y abrir un cuento no debería poner música sola.
+   *  Si ya está sonando, cambia de pista en el momento. */
+  const selectTrack = React.useCallback(async (id: string) => {
+    if (!TRACKS.some((t) => t.id === id)) return;
+    userPickedRef.current = true;
+    if (isPlaying) {
+      await play(id);
+      return;
+    }
+    setCurrentTrackId(id);
+    onTrackChangeRef.current?.(id);
+  }, [isPlaying, play]);
+
   React.useEffect(() => {
     return () => { unload(); };
   }, [unload]);
@@ -147,10 +162,8 @@ export function useMusicPlayer(options: MusicPlayerOptions = {}) {
     play,
     pause,
     setVolume: setVolumeSafe,
-    setTrack: (id: string) => {
-      userPickedRef.current = true;
-      return play(id);
-    },
+    setTrack,
+    selectTrack,
   };
 }
 
