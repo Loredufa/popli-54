@@ -1,13 +1,13 @@
 import { Feather } from '@expo/vector-icons';
+import { Audio } from 'expo-av';
 import * as React from 'react';
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { Audio } from 'expo-av';
 import {
-  saveNamedVoice,
   loadNamedVoices,
+  MAX_NAMED_VOICES,
+  saveNamedVoice,
   voiceLabelExists,
   VoiceLimitError,
-  MAX_NAMED_VOICES,
   type NamedVoiceData,
 } from '../lib/voicePrefs';
 import { THEME } from '../theme';
@@ -15,7 +15,25 @@ import { THEME } from '../theme';
 const MIN_DURATION_SEC = 20;
 const MAX_DURATION_SEC = 60;
 
-const READING_SCRIPT = `Había una vez un bosque mágico donde los árboles susurraban historias antes de dormir. Un ratoncito curioso, un zorro juguetón y una lechuza sabia se reunían cada noche bajo la luna para compartir sus aventuras. «¿Qué cuento nos regalarás hoy?», preguntaban todos con los ojos bien abiertos. La brisa movía las hojas mientras las estrellas parpadeaban, una por una, como si también quisieran escuchar. Y así, entre risas, ronroneos y un poquito de magia, comenzaba otra noche llena de sueños en Poplicuentos.`;
+// El worker condiciona el clon con una ventana de 15s que arranca en el segundo 5
+// (ver DEFAULT_REFERENCE_SKIP/MAX_SECONDS en poplicuentos-chatterbox-runpod/src/handler.py).
+// O sea: de todo lo que se grabe, la voz clonada sale de los caracteres ~50 a ~300.
+//
+// El guion viejo era neutro justo ahi: en ese tramo no habia ni una "ll" ni una "y"
+// consonantica, que es el rasgo que mas identifica al acento rioplatense. La unica palabra
+// que lo llevaba ("estrellas") caia recien en el segundo 30, fuera de la ventana. Por eso
+// el clon salia hablando neutro: nunca escucho el acento.
+//
+// Los marcadores que caen dentro del tramo util son "lluvia", "ya", "orilla del arroyo" y
+// "Alla arriba": 3 leyendo lento, 6 leyendo rapido. Es a proposito que no sean mas. Un texto
+// sobrecargado de "ll" se lee con voz de trabalenguas, y esa voz forzada es justo la que
+// termina clonada. Ojo con el "Llego" del principio: cae en el caracter 0, fuera de la
+// ventana, asi que no cuenta — no sirve para cumplir la cuota.
+//
+// El acento tampoco vive solo aca. La entonacion y el ritmo rioplatense salen en todo lo
+// que se hable; estos marcadores son el piso audible, no la unica señal. Si se cambia el
+// guion, que no vuelva a quedar en CERO entre los caracteres 50 y 300, que era el bug.
+const READING_SCRIPT = `Llegó la noche en el bosque mágico, donde los árboles susurraban historias antes de dormir. Bajo la lluvia, un ratoncito curioso, un zorro juguetón y una lechuza sabia ya se reunían en la orilla del arroyo para contarse sus aventuras. Allá arriba, las estrellas parpadeaban una por una, como si también quisieran escuchar. «¿Qué cuento nos vas a contar hoy?», preguntaban todos llenos de emoción y con los ojos bien abiertos. Y así, entre risas, ronroneos y un poquito de magia, comenzaba otra noche llena de sueños en Poplicuentos.`;
 
 type Step = 'name' | 'ready' | 'recording' | 'review' | 'saving';
 
@@ -130,7 +148,7 @@ export default function VoiceRecorder({ onSaved, onCancel }: Props) {
         Grabar mi voz
       </Text>
       <Text style={{ color: THEME.textDim, marginBottom: 16 }}>
-        Grabá 20 a 60 segundos leyendo el texto de abajo. Vamos a usar tu voz para narrar cuentos, sin mandarla a ningún servicio de terceros — solo se guarda en tu teléfono.
+        Grabá 20 a 60 segundos contando el cuento de abajo. Vamos a usar tu voz para narrar cuentos, sin mandarla a ningún servicio de terceros — solo se guarda en tu teléfono.
       </Text>
 
       <TextInput
@@ -152,7 +170,11 @@ export default function VoiceRecorder({ onSaved, onCancel }: Props) {
       ) : null}
 
       <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, borderWidth: 1, borderColor: THEME.border, padding: 14, marginBottom: 16 }}>
-        <Text style={{ color: THEME.textDim, fontSize: 12, marginBottom: 6, fontWeight: '700' }}>LEÉ ESTO EN VOZ ALTA</Text>
+        <Text style={{ color: THEME.textDim, fontSize: 12, marginBottom: 6, fontWeight: '700' }}>CONTÁ ESTO EN VOZ ALTA</Text>
+        <Text style={{ color: THEME.textDim, fontSize: 12, marginBottom: 10, lineHeight: 17 }}>
+          No lo leas como un texto: contalo como si se lo contaras a un chico. Si leés, la voz clonada
+          sale plana y sin acento.
+        </Text>
         <ScrollView style={{ maxHeight: 180 }}>
           <Text style={{ color: THEME.text, fontSize: 15, lineHeight: 22 }}>{READING_SCRIPT}</Text>
         </ScrollView>
