@@ -11,8 +11,16 @@
 // worker no sabe dónde poner los silencios. Por eso `storyText` se guarda crudo y el
 // stripping pasa solo en los bordes de presentación.
 
-/** Marcas de narración: "(pausa)", "[PAUSA]", "( Pausa )"... */
-const NARRATION_CUE_PATTERN = String.raw`[([]\s*pausa\s*[)\]]`;
+/**
+ * Marcas de narración: "(pausa)", "[PAUSA]", "( Pausa )", y tambien las variantes que el
+ * modelo manda aunque el prompt pida la forma canonica: "(pausa breve)", "[Pausa...]",
+ * "—pausa—". El limite de 24 caracteres dentro del parentesis acota el match a
+ * calificadores cortos y evita comerse una oracion que casualmente empiece con la palabra.
+ *
+ * Mismo patron que PAUSE_CUE_RE en poplicuentos-api/lib/tts.ts y PAUSE_MARKER_RE en
+ * poplicuentos-chatterbox-runpod/src/handler.py: si se toca uno, tocar los tres.
+ */
+const NARRATION_CUE_PATTERN = String.raw`[([{]\s*pausas?\b[^)\]}]{0,24}[)\]}]|[—–]\s*pausas?\s*[—–]`;
 
 /** Saca las marcas de narración y normaliza los espacios que quedan. */
 export function stripNarrationCues(text: string): string {

@@ -78,7 +78,12 @@ export async function fetchVoicePreview(voiceId: string, locale = 'es-LATAM'): P
   return fileUri;
 }
 
-export type NarrationResult = { fileUri: string; assetUri: string };
+// Sin `assetUri` a proposito. `MediaLibrary.saveToLibraryAsync` devuelve void: guarda en la
+// galeria pero no dice donde quedo. El campo existia y siempre valia undefined; nadie lo
+// usaba, porque el asset de galeria no sirve para nuestro caso (el usuario lo puede borrar
+// desde la galeria, y en iOS es un `ph://` que despues no se puede copiar a la carpeta del
+// cuento — ver el comentario en app/story-audio.tsx). Lo que se guarda es `fileUri`.
+export type NarrationResult = { fileUri: string };
 
 export async function fetchNarrationTemp(opts: {
   storyText: string;
@@ -147,6 +152,6 @@ export async function downloadNarrationToGallery(opts: {
   const base64 = buffer.toString('base64');
   const fileUri = `${FileSystem.documentDirectory}narracion-${Date.now()}.${ext}`;
   await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: BASE64_ENCODING as FileSystem.EncodingType });
-  const assetUri = await MediaLibrary.saveToLibraryAsync(fileUri);
-  return { fileUri, assetUri };
+  await MediaLibrary.saveToLibraryAsync(fileUri);
+  return { fileUri };
 }

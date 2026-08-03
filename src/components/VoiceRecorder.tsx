@@ -15,6 +15,19 @@ import { THEME } from '../theme';
 const MIN_DURATION_SEC = 20;
 const MAX_DURATION_SEC = 60;
 
+// La ventana [5s, 20s] es la que el worker recorta para condicionar el clon (ver mas abajo).
+// Si JUSTO ese tramo salio bajito, la voz clonada sale peor y no hay forma de saberlo
+// escuchando el resto de la grabacion, asi que se mide aparte.
+const REFERENCE_WINDOW_START_MS = 5_000;
+const REFERENCE_WINDOW_END_MS = 20_000;
+
+// dBFS: 0 es el maximo y los valores son negativos. Debajo de esto la muestra esta tan floja
+// que el ASR transcribe mal y el clon sale sordo. Es un aviso, no un bloqueo: el umbral es
+// aproximado y depende del microfono.
+const LOW_LEVEL_DBFS = -35;
+
+const METERING_INTERVAL_MS = 250;
+
 // El worker condiciona el clon con una ventana de 15s que arranca en el segundo 5
 // (ver DEFAULT_REFERENCE_SKIP/MAX_SECONDS en poplicuentos-chatterbox-runpod/src/handler.py).
 // O sea: de todo lo que se grabe, la voz clonada sale de los caracteres ~50 a ~300.
@@ -50,6 +63,9 @@ export default function VoiceRecorder({ onSaved, onCancel }: Props) {
   const [recordingUri, setRecordingUri] = React.useState<string | null>(null);
   const [playing, setPlaying] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [level, setLevel] = React.useState(0); // 0..1, solo para la barra en vivo
+  const [lowLevel, setLowLevel] = React.useState(false);
+  const meterSamplesRef = React.useRef<Array<{ ms: number; db: number }>>([]);
   const recordingRef = React.useRef<Audio.Recording | null>(null);
   const playbackRef = React.useRef<Audio.Sound | null>(null);
   const timerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
@@ -75,6 +91,17 @@ export default function VoiceRecorder({ onSaved, onCancel }: Props) {
     await recording.stopAndUnloadAsync().catch(() => {});
     const uri = recording.getURI();
     recordingRef.current = null;
+
+    const inWindow = meterSamplesRef.current.filter(
+      (s) => s.ms >= REFERENCE_WINDOW_START_MS && s.ms <= REFERENCE_WINDOW_END_MS
+    );
+    // Sin muestras no se avisa nada: el metering no esta garantizado en todas las
+    // plataformas y un falso aviso es peor que ninguno.
+    const avg = inWindow.length
+      ? inWindow.reduce((acc, s) => acc + s.db, 0) / inWindow.length
+      : null;
+    setLowLevel(avg !== null && avg < LOW_LEVEL_DBFS);
+
     setRecordingUri(uri);
     setStep('review');
   }, []);
@@ -86,7 +113,19 @@ export default function VoiceRecorder({ onSaved, onCancel }: Props) {
       return;
     }
     await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-    const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+    meterSamplesRef.current = [];
+    setLevel(0);
+    setLowLevel(false);
+    const { recording } = await Audio.Recording.createAsync(
+      { ...Audio.RecordingOptionsPresets.HIGH_QUALITY, isMeteringEnabled: true },
+      (status) => {
+        if (!status.isRecording || typeof status.metering !== 'number') return;
+        meterSamplesRef.current.push({ ms: status.durationMillis, db: status.metering });
+        // -60 dBFS ya es silencio a efectos practicos: sirve como piso de la barra.
+        setLevel(Math.max(0, Math.min(1, (status.metering + 60) / 60)));
+      },
+      METERING_INTERVAL_MS
+    );
     recordingRef.current = recording;
     setSeconds(0);
     setStep('recording');
@@ -118,6 +157,9 @@ export default function VoiceRecorder({ onSaved, onCancel }: Props) {
   const reRecord = React.useCallback(() => {
     setRecordingUri(null);
     setSeconds(0);
+    setLowLevel(false);
+    setLevel(0);
+    meterSamplesRef.current = [];
     setStep('ready');
   }, []);
 
@@ -195,6 +237,9 @@ export default function VoiceRecorder({ onSaved, onCancel }: Props) {
           <Text style={{ color: withinRange ? THEME.accent : THEME.textDim, fontSize: 28, fontWeight: '700', marginBottom: 12 }}>
             {String(Math.floor(seconds / 60)).padStart(2, '0')}:{String(seconds % 60).padStart(2, '0')}
           </Text>
+          <View style={{ width: 200, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.12)', marginBottom: 14, overflow: 'hidden' }}>
+            <View style={{ width: `${Math.round(level * 100)}%`, height: '100%', backgroundColor: THEME.accent }} />
+          </View>
           <Pressable onPress={stopRecording} style={{ width: 84, height: 84, borderRadius: 42, backgroundColor: '#ff5a5a', alignItems: 'center', justifyContent: 'center' }}>
             <Feather name="square" size={28} color="#fff" />
           </Pressable>
@@ -209,6 +254,12 @@ export default function VoiceRecorder({ onSaved, onCancel }: Props) {
           <Text style={{ color: THEME.textDim, textAlign: 'center', marginBottom: 12 }}>
             Grabaste {seconds}s. {withinRange ? '' : `Necesitás entre ${MIN_DURATION_SEC} y ${MAX_DURATION_SEC}s.`}
           </Text>
+          {lowLevel ? (
+            <Text style={{ color: '#ffd28a', fontSize: 12, textAlign: 'center', marginBottom: 12 }}>
+              Se te escucha bajito. Acercate al teléfono y grabá de nuevo: la voz clonada sale
+              del principio de la grabación, así que si ahí suena flojo el cuento sale peor.
+            </Text>
+          ) : null}
           <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginBottom: 16 }}>
             <Pressable onPress={playPreview} style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Feather name={playing ? 'volume-2' : 'play'} size={20} color={THEME.accent} />

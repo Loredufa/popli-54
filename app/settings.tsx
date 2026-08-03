@@ -18,6 +18,12 @@ import {
   MAX_NAMED_VOICES,
   type NamedVoiceData,
 } from '../src/lib/voicePrefs';
+import {
+  ACCENT_OPTIONS,
+  loadAccentPreferences,
+  saveAccentPreference,
+  type AccentPrefs,
+} from '../src/lib/accentPrefs';
 import { useStory } from '../src/story/StoryContext';
 import { useLanguage } from '../src/i18n/LanguageContext';
 import { AppLocale } from '../src/i18n/translations';
@@ -40,7 +46,24 @@ export default function SettingsScreen() {
     const [loadingVoices, setLoadingVoices] = React.useState(false);
     const [previewing, setPreviewing] = React.useState<string | null>(null);
     const [namedVoices, setNamedVoices] = React.useState<NamedVoiceData[]>([]);
+    const [accentPrefs, setAccentPrefs] = React.useState<AccentPrefs>({});
     const soundRef = React.useRef<Audio.Sound | null>(null);
+
+    // Variedades que se ofrecen para el idioma ACTUAL de la app. El japones no tiene ninguna, y
+    // ahi la seccion entera no se muestra.
+    const accentOptions = ACCENT_OPTIONS[appLocale] ?? [];
+    const selectedAccent = accentPrefs[appLocale] ?? null;
+
+    React.useEffect(() => {
+      let active = true;
+      loadAccentPreferences().then((p) => { if (active) setAccentPrefs(p); });
+      return () => { active = false; };
+    }, []);
+
+    const chooseAccent = async (region: string | null) => {
+      // `null` vuelve a automatico, o sea a la region del dispositivo.
+      setAccentPrefs(await saveAccentPreference(appLocale, region));
+    };
 
     useFocusEffect(
       React.useCallback(() => {
@@ -219,6 +242,49 @@ export default function SettingsScreen() {
                             </TouchableOpacity>
                         ))}
                     </View>
+
+                    {accentOptions.length > 0 && (
+                      <>
+                        <View style={{ height: 1, backgroundColor: THEME.border, marginVertical: 10 }} />
+
+                        {/* Acento de la narracion, para el idioma de la app que este activo.
+                            "Automatico" usa la region del dispositivo; elegir una variedad la pisa.
+                            Se guarda por idioma: se puede querer rioplatense en español y americano
+                            en ingles al mismo tiempo. */}
+                        <Text style={{ color: THEME.text, fontSize: 16, fontWeight: 'bold', marginBottom: 8 }}>
+                            {t.settings_accent_title}
+                        </Text>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 16 }}>
+                            {[{ region: null, label: t.settings_accent_auto }, ...accentOptions].map(({ region, label }) => {
+                                const active = selectedAccent === region;
+                                return (
+                                    <TouchableOpacity
+                                        key={region ?? 'auto'}
+                                        onPress={() => chooseAccent(region)}
+                                        style={{
+                                            paddingVertical: 6,
+                                            paddingHorizontal: 14,
+                                            borderRadius: 999,
+                                            borderWidth: 1,
+                                            borderColor: active ? THEME.primary : THEME.border,
+                                            backgroundColor: active ? 'rgba(90,160,255,0.15)' : 'transparent',
+                                            marginRight: 8,
+                                            marginBottom: 8,
+                                        }}
+                                    >
+                                        <Text style={{
+                                            color: active ? THEME.accent : THEME.textDim,
+                                            fontWeight: active ? '700' : '400',
+                                            fontSize: 14,
+                                        }}>
+                                            {label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </View>
+                      </>
+                    )}
 
                     <View style={{ height: 1, backgroundColor: THEME.border, marginVertical: 10 }} />
 

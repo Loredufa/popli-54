@@ -49,6 +49,11 @@ Mamá, papá o cualquier familiar puede grabar su voz, ponerle un nombre, y esa 
 - **Multi-voz**: hasta **3** voces guardadas a la vez (`MAX_NAMED_VOICES` en `voicePrefs.ts`), cada una con nombre propio, todas seleccionables juntas.
 - **Dónde se gestiona**: grabar desde "Música y narrador" (sección "Narrador") o desde Ajustes → "Mis voces". Borrar se puede desde los dos lados, siempre con confirmación, vía `deleteNamedVoiceCascade()` — que además limpia lo que dependía de esa voz (la narración ya generada con ella, su archivo en disco y la preferencia de narrador si era la activa). Sin la cascada quedaban entradas `custom:<id>` colgadas apuntando a una voz inexistente.
 - **Formato**: Chatterbox devuelve WAV (no MP3) — el cliente elige la extensión/mime dinámicamente según el header `X-TTS-Format`.
+- **Nivel de grabación**: se mide con el metering de `expo-av` y se muestra una barra en vivo. Al terminar, si el tramo `[5s, 20s]` — que es el único que el worker usa para condicionar el clon — salió por debajo de -35 dBFS, se avisa que se escucha bajito. Es un aviso, no un bloqueo: el umbral depende del micrófono.
+
+### Marcas de narración — `src/story/text.ts`
+
+`stripNarrationCues` saca las marcas `(pausa)` de todo lo que el usuario ve (pantalla, PDF, texto compartido). **El texto que se manda a narrar va CON las marcas**: es el worker el que las convierte en silencio real. El mismo patrón vive en `PAUSE_CUE_RE` (`poplicuentos-api/lib/tts.ts`) y `PAUSE_MARKER_RE` (worker); si se toca uno, tocar los tres. Tolera variantes (`(pausa breve)`, `[Pausa...]`, `—pausa—`) porque el generador no siempre respeta la forma canónica, y una variante sin reconocer termina leída en voz alta.
 
 Historia: hasta el 2026-07-10 esta feature usaba ElevenLabs, un proveedor de terceros agregado sin decisión consciente del proyecto y sin créditos configurados — se sacó por completo y se reconstruyó desde cero con el enfoque self-hosted descripto arriba.
 

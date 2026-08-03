@@ -18,6 +18,8 @@ import { useMusicPlayer } from '../lib/musicPlayer';
 import { fetchNarrationTemp } from '../lib/ttsClient';
 import { localAssetExists } from '../lib/localAssets';
 import { loadNamedVoices } from '../lib/voicePrefs';
+import { getNarrationLocale } from '../lib/narrationLocale';
+import { useLanguage } from '../i18n/LanguageContext';
 import { useStory } from './StoryContext';
 
 export type NarrationStatus = 'idle' | 'loading' | 'playing' | 'paused';
@@ -44,6 +46,7 @@ const PlaybackContext = React.createContext<PlaybackContextType | null>(null);
 
 export function PlaybackProvider({ children }: { children: React.ReactNode }) {
   const { storyText, voiceId, audioMap, setAudioMap, musicTrackId, setMusicTrackId } = useStory();
+  const { appLocale } = useLanguage();
 
   const music = useMusicPlayer({ initialTrackId: musicTrackId, onTrackChange: setMusicTrackId });
 
@@ -130,7 +133,10 @@ export function PlaybackProvider({ children }: { children: React.ReactNode }) {
 
       if (!uri) {
         const referenceAudioUri = await resolveReferenceAudioUri(vid);
-        uri = await fetchNarrationTemp({ storyText, voiceId: vid, locale: 'es-AR', referenceAudioUri });
+        // El locale se resuelve ACA y no al montar el provider: si el usuario acaba de cambiar el
+        // acento en Ajustes, esta narracion ya sale con el nuevo.
+        const locale = await getNarrationLocale(appLocale);
+        uri = await fetchNarrationTemp({ storyText, voiceId: vid, locale, referenceAudioUri });
         // El audio ya generado se guarda igual aunque el usuario haya cancelado: costó
         // minutos de GPU, y así el próximo play arranca al toque.
         setAudioMap((prev) => ({ ...prev, [vid]: uri as string }));
@@ -176,7 +182,7 @@ export function PlaybackProvider({ children }: { children: React.ReactNode }) {
       setStatus('idle');
       setStatusText(null);
     }
-  }, [storyText, voiceId, audioMap, setAudioMap, status, unload, resolveReferenceAudioUri]);
+  }, [storyText, voiceId, audioMap, setAudioMap, status, unload, resolveReferenceAudioUri, appLocale]);
 
   const pause = React.useCallback(async () => {
     if (!soundRef.current) return;

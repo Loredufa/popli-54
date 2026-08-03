@@ -13,6 +13,7 @@ import NarratorPicker, { type NarratorVoice } from '../src/components/NarratorPi
 import StoryReader from '../src/components/StoryReader';
 import { buildMenuItems } from '../src/constants/menu';
 import { useLanguage } from '../src/i18n/LanguageContext';
+import { getNarrationLocale } from '../src/lib/narrationLocale';
 import { usePlayback } from '../src/story/PlaybackContext';
 import { clearCurrentSession } from '../src/lib/storage';
 import { saveStoryBundle } from '../src/lib/storyLibrary';
@@ -36,7 +37,7 @@ const VOICE_LABELS: Record<string, string> = {
 };
 
 export default function StoryAudioScreen() {
-  const { t } = useLanguage();
+  const { t, appLocale } = useLanguage();
   const { user, logout } = useAuth();
   const {
     storyText, meta, theme, illustrations,
@@ -189,7 +190,7 @@ export default function StoryAudioScreen() {
       const res = await downloadNarrationToGallery({
         storyText,
         voiceId: currentVoiceId,
-        locale: 'es-LATAM',
+        locale: await getNarrationLocale(appLocale),
         referenceAudioUri: selectedVoiceEntry?.referenceAudioUri,
       });
       // Guardamos SIEMPRE `fileUri` (documentDirectory, nuestro) y no el asset de galería: ese
@@ -202,7 +203,7 @@ export default function StoryAudioScreen() {
     } finally {
       setAudioLoading(false);
     }
-  }, [storyText, voiceId, selectedVoiceEntry, audioMap, setAudioMap, t]);
+  }, [storyText, voiceId, selectedVoiceEntry, audioMap, setAudioMap, t, appLocale]);
 
   const handleShareAudio = React.useCallback(async () => {
     if (Platform.OS === 'web') {

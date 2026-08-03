@@ -5,6 +5,8 @@ export type TranslationKeys = {
   settings_title: string;
   settings_voices_title: string;
   settings_app_language_title: string;
+  settings_accent_title: string;
+  settings_accent_auto: string;
   settings_loading_voices: string;
   settings_version: string;
   settings_change_password: string;
@@ -71,6 +73,8 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     settings_title: 'Configuración',
     settings_voices_title: 'Voces narradoras',
     settings_app_language_title: 'Idioma de la app',
+    settings_accent_title: 'Acento de la narración',
+    settings_accent_auto: 'Automático',
     settings_loading_voices: 'Cargando voces...',
     settings_version: 'Versión 1.0.0',
     settings_change_password: 'Cambiar Contraseña',
@@ -126,6 +130,8 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     settings_title: 'Settings',
     settings_voices_title: 'Narrator voices',
     settings_app_language_title: 'App language',
+    settings_accent_title: 'Narration accent',
+    settings_accent_auto: 'Automatic',
     settings_loading_voices: 'Loading voices...',
     settings_version: 'Version 1.0.0',
     settings_change_password: 'Change Password',
@@ -181,6 +187,8 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     settings_title: 'Configurações',
     settings_voices_title: 'Vozes narradoras',
     settings_app_language_title: 'Idioma do app',
+    settings_accent_title: 'Sotaque da narração',
+    settings_accent_auto: 'Automático',
     settings_loading_voices: 'Carregando vozes...',
     settings_version: 'Versão 1.0.0',
     settings_change_password: 'Alterar Senha',
@@ -236,6 +244,8 @@ export const TRANSLATIONS: Record<AppLocale, TranslationKeys> = {
     settings_title: '設定',
     settings_voices_title: 'ナレーターの声',
     settings_app_language_title: 'アプリの言語',
+    settings_accent_title: 'ナレーションのアクセント',
+    settings_accent_auto: '自動',
     settings_loading_voices: '声を読み込み中...',
     settings_version: 'バージョン 1.0.0',
     settings_change_password: 'パスワードを変更',
