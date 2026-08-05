@@ -2,14 +2,17 @@
 import Constants from 'expo-constants';
 import { router, useLocalSearchParams } from 'expo-router';
 import React from 'react';
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, Text, View } from 'react-native';
 
 import { useApi } from '../src/api/useApi';
 import { saveLastResetEmail } from '../src/auth/resetStorage';
 import Card from '../src/components/Card';
+import Field from '../src/components/Field';
 import BrandLogo from '../src/components/BrandLogo';
 import PrimaryButton from '../src/components/PrimaryButton';
 import { THEME } from '../src/theme';
+import { useLanguage } from '../src/i18n/LanguageContext';
+import { feedback } from '../src/ui/feedback';
 
 const EXTRA = (Constants.expoConfig?.extra as any) || {};
 const FORGOT_PATH = EXTRA.FORGOT_PATH || '/api/forgot-password';
@@ -17,6 +20,7 @@ const FORGOT_PATH = EXTRA.FORGOT_PATH || '/api/forgot-password';
 export default function ModalScreen() {
   const { topic } = useLocalSearchParams<{ topic?: string }>();
   const api = useApi();
+  const { t } = useLanguage();
 
   // Si querés usar este modal para varias cosas, discriminamos por "topic"
   const isForgot = topic === 'forgot' || !topic;
@@ -33,10 +37,10 @@ export default function ModalScreen() {
       // Tu API debe enviar el mail de recuperación (Supabase o lo que uses)
       await api.post(FORGOT_PATH, { email: normalizedEmail });
       await saveLastResetEmail(normalizedEmail);
-      Alert.alert('Listo', 'Te enviamos un enlace para restablecer tu contraseña.');
+      feedback.success(t.msg_reset_link_sent_title, t.msg_reset_link_sent_msg);
       router.push({ pathname: '/reset-password', params: { email: normalizedEmail } });
     } catch (e: any) {
-      Alert.alert('No se pudo enviar el enlace', e.message || 'Error');
+      feedback.error(t.msg_reset_link_failed_title, e?.message || t.msg_retry_hint);
     } finally {
       setLoading(false);
     }
@@ -78,18 +82,5 @@ export default function ModalScreen() {
         )}
       </ScrollView>
     </KeyboardAvoidingView>
-  );
-}
-
-function Field(props: any) {
-  return (
-    <View style={{ marginBottom: 10 }}>
-      <Text style={{ color: THEME.textDim, marginBottom: 6 }}>{props.label}</Text>
-      <TextInput
-        {...props}
-        placeholderTextColor={THEME.textDim}
-        style={{ color: THEME.text, borderColor: THEME.border, borderWidth: 1, borderRadius: 12, padding: 10 }}
-      />
-    </View>
   );
 }

@@ -1,16 +1,19 @@
-import { Feather } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, Text, View } from 'react-native';
 import { useAuth } from '../src/auth/AuthProvider';
 import { clearLastResetEmail, loadLastResetEmail, saveLastResetEmail } from '../src/auth/resetStorage';
 import Card from '../src/components/Card';
+import Field from '../src/components/Field';
 import BrandLogo from '../src/components/BrandLogo';
 import PrimaryButton from '../src/components/PrimaryButton';
 import { THEME } from '../src/theme';
+import { useLanguage } from '../src/i18n/LanguageContext';
+import { feedback } from '../src/ui/feedback';
 
 export default function ResetPasswordScreen() {
     const { resetPassword } = useAuth();
+    const { t } = useLanguage();
     const params = useLocalSearchParams<{ email?: string }>();
 
     const [email, setEmail] = React.useState(params.email || '');
@@ -49,9 +52,9 @@ export default function ResetPasswordScreen() {
         const res = await resetPassword(email, code, newPassword);
         setLoading(false);
         if (!res.ok) {
-            Alert.alert('Error', res.error);
+            feedback.error(t.msg_password_change_failed_title, res.error || t.msg_retry_hint);
         } else {
-            Alert.alert('Éxito', 'Contraseña restablecida. Ahora podés iniciar sesión.');
+            feedback.success(t.msg_password_reset_title, t.msg_password_reset_msg);
             await clearLastResetEmail();
             router.replace('/login');
         }
@@ -77,49 +80,5 @@ export default function ResetPasswordScreen() {
                 </Card>
             </ScrollView>
         </KeyboardAvoidingView>
-    );
-}
-
-type FieldProps = {
-    label: string;
-    style?: any;
-    secureTextEntry?: boolean;
-    [key: string]: any;
-};
-
-function Field({ label, style, secureTextEntry, ...rest }: FieldProps) {
-    const isPassword = Boolean(secureTextEntry);
-    const [hidden, setHidden] = React.useState(isPassword);
-    return (
-        <View style={{ marginBottom: 10 }}>
-            <Text style={{ color: THEME.textDim, marginBottom: 6 }}>{label}</Text>
-            <View style={{ position: 'relative' }}>
-                <TextInput
-                    {...rest}
-                    placeholderTextColor={THEME.textDim}
-                    secureTextEntry={isPassword ? hidden : secureTextEntry}
-                    style={[
-                        {
-                            color: THEME.text,
-                            borderColor: THEME.border,
-                            borderWidth: 1,
-                            borderRadius: 12,
-                            padding: 10,
-                            paddingRight: isPassword ? 40 : 10,
-                        },
-                        style,
-                    ]}
-                />
-                {isPassword && (
-                    <Pressable
-                        onPress={() => setHidden(prev => !prev)}
-                        hitSlop={10}
-                        style={{ position: 'absolute', right: 10, top: 0, bottom: 0, justifyContent: 'center' }}
-                    >
-                        <Feather name={hidden ? 'eye' : 'eye-off'} size={20} color={THEME.textDim} />
-                    </Pressable>
-                )}
-            </View>
-        </View>
     );
 }

@@ -4,12 +4,14 @@ import { router, type Href } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useFocusEffect } from '@react-navigation/native';
 import * as React from 'react';
-import { ActivityIndicator, Alert, Image, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAuth } from '../../src/auth/AuthProvider';
 import AppNavbar from '../../src/components/AppNavbar';
 import { buildMenuItems } from '../../src/constants/menu';
 import { useLanguage } from '../../src/i18n/LanguageContext';
+import { fmt } from '../../src/i18n/format';
+import { feedback } from '../../src/ui/feedback';
 import { clearCurrentSession } from '../../src/lib/storage';
 import { deleteStoryBundle, loadLibrary, loadStoryBundle, type SavedStoryEntry } from '../../src/lib/storyLibrary';
 import { useStory } from '../../src/story/StoryContext';
@@ -62,54 +64,50 @@ export default function SavedStoriesScreen() {
       await logout();
       router.replace('/login');
     } catch (e: any) {
-      Alert.alert('Error al cerrar sesion', e?.message || 'Intentalo de nuevo.');
+      feedback.error(t.msg_logout_failed_title, e?.message || t.msg_retry_hint);
     } finally {
       setLoggingOut(false);
     }
-  }, [logout, loggingOut, clearStory]);
+  }, [logout, loggingOut, clearStory, t]);
 
   const handleOpenPdf = React.useCallback(async (entry: SavedStoryEntry) => {
     if (Platform.OS === 'web') {
-      Alert.alert('Usa la app móvil', 'Abrir el PDF funciona en dispositivo o emulador, no en web.');
+      feedback.info(t.msg_mobile_only_title, t.msg_mobile_only_pdf);
       return;
     }
     try {
       const bundle = await loadStoryBundle(entry.id);
       if (!bundle?.pdfUri) {
-        Alert.alert('Sin PDF', 'Este cuento se guardó sin PDF. Abrilo desde "Inicio" y volvé a guardarlo.');
+        feedback.warning(t.msg_pdf_missing_title, t.msg_pdf_missing_msg);
         return;
       }
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(bundle.pdfUri, { mimeType: 'application/pdf', dialogTitle: entry.title });
       } else {
-        Alert.alert('No disponible', 'Este dispositivo no puede abrir el PDF.');
+        feedback.warning(t.msg_pdf_unsupported_title, t.msg_pdf_unsupported_msg);
       }
     } catch (e: any) {
-      Alert.alert('No se pudo abrir', e?.message || 'Intentalo de nuevo.');
+      feedback.error(t.msg_pdf_open_failed_title, e?.message || t.msg_retry_hint);
     }
-  }, []);
+  }, [t]);
 
-  const handleDelete = React.useCallback((entry: SavedStoryEntry) => {
-    Alert.alert(
-      'Borrar cuento',
-      `¿Borrar "${entry.title}"? Se borran el texto, las ilustraciones y la narración guardados.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Borrar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteStoryBundle(entry.id);
-              setEntries((prev) => prev.filter((e) => e.id !== entry.id));
-            } catch (e: any) {
-              Alert.alert('No se pudo borrar', e?.message || 'Intentalo de nuevo.');
-            }
-          },
-        },
-      ],
-    );
-  }, []);
+  const handleDelete = React.useCallback(async (entry: SavedStoryEntry) => {
+    const confirmed = await feedback.dialog({
+      kind: 'warning',
+      title: t.msg_delete_story_title,
+      message: fmt(t.msg_delete_story_msg, { title: entry.title }),
+      cancelLabel: t.msg_cancel,
+      confirmLabel: t.msg_delete,
+      destructive: true,
+    });
+    if (!confirmed) return;
+    try {
+      await deleteStoryBundle(entry.id);
+      setEntries((prev) => prev.filter((e) => e.id !== entry.id));
+    } catch (e: any) {
+      feedback.error(t.msg_delete_story_failed_title, e?.message || t.msg_retry_hint);
+    }
+  }, [t]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

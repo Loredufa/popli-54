@@ -6,8 +6,10 @@
 import { Feather } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import * as React from 'react';
-import { Alert, Image, Pressable, Text, View } from 'react-native';
+import { Image, Pressable, Text, View } from 'react-native';
 import { THEME } from '../ui/theme';
+import { useLanguage } from '../i18n/LanguageContext';
+import { feedback } from '../ui/feedback';
 
 export type SavedNarrationOption = { voiceId: string; label: string; uri: string };
 
@@ -44,6 +46,7 @@ const IconButton = ({
 );
 
 export default function SavedStoryPlayer({ narrations, onPlaybackStart, onPlaybackStop }: Props) {
+  const { t } = useLanguage();
   const [selected, setSelected] = React.useState(0);
   const [playing, setPlaying] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
@@ -102,11 +105,11 @@ export default function SavedStoryPlayer({ narrations, onPlaybackStart, onPlayba
         }
       });
     } catch (e: any) {
-      Alert.alert('No se pudo reproducir', e?.message || 'El archivo de narración no está disponible.');
+      feedback.error(t.msg_playback_failed_title, e?.message || t.msg_playback_failed_msg);
     } finally {
       setLoading(false);
     }
-  }, [current, onPlaybackStart, onPlaybackStop]);
+  }, [current, onPlaybackStart, onPlaybackStop, t]);
 
   const pause = React.useCallback(async () => {
     await soundRef.current?.pauseAsync().catch(() => {});

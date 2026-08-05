@@ -3,7 +3,7 @@ import { Feather } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import * as React from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAuth } from '../../src/auth/AuthProvider';
 import AppNavbar from '../../src/components/AppNavbar';
@@ -11,6 +11,7 @@ import MusicBar from '../../src/components/MusicBar';
 import SavedStoryPlayer, { StoryIllustration } from '../../src/components/SavedStoryPlayer';
 import { buildMenuItems } from '../../src/constants/menu';
 import { useLanguage } from '../../src/i18n/LanguageContext';
+import { feedback } from '../../src/ui/feedback';
 import { usePlayback } from '../../src/story/PlaybackContext';
 import { clearCurrentSession } from '../../src/lib/storage';
 import { loadStoryBundle, type LoadedStory } from '../../src/lib/storyLibrary';
@@ -72,16 +73,16 @@ export default function SavedStoryScreen() {
       await logout();
       router.replace('/login');
     } catch (e: any) {
-      Alert.alert('Error al cerrar sesion', e?.message || 'Intentalo de nuevo.');
+      feedback.error(t.msg_logout_failed_title, e?.message || t.msg_retry_hint);
     } finally {
       setLoggingOut(false);
     }
-  }, [logout, loggingOut, clearStory]);
+  }, [logout, loggingOut, clearStory, t]);
 
   const handleOpenPdf = React.useCallback(async () => {
     if (!bundle?.pdfUri) return;
     if (Platform.OS === 'web') {
-      Alert.alert('Usa la app móvil', 'Abrir el PDF funciona en dispositivo o emulador, no en web.');
+      feedback.info(t.msg_mobile_only_title, t.msg_mobile_only_pdf);
       return;
     }
     try {
@@ -89,9 +90,9 @@ export default function SavedStoryScreen() {
         await Sharing.shareAsync(bundle.pdfUri, { mimeType: 'application/pdf', dialogTitle: bundle.entry.title });
       }
     } catch (e: any) {
-      Alert.alert('No se pudo abrir', e?.message || 'Intentalo de nuevo.');
+      feedback.error(t.msg_pdf_open_failed_title, e?.message || t.msg_retry_hint);
     }
-  }, [bundle]);
+  }, [bundle, t]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

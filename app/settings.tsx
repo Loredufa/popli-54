@@ -1,7 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React from 'react';
-import { Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Audio } from 'expo-av';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../src/auth/AuthProvider';
@@ -26,6 +26,8 @@ import {
 } from '../src/lib/accentPrefs';
 import { useStory } from '../src/story/StoryContext';
 import { useLanguage } from '../src/i18n/LanguageContext';
+import { fmt } from '../src/i18n/format';
+import { feedback } from '../src/ui/feedback';
 import { AppLocale } from '../src/i18n/translations';
 
 const AVAILABLE_LANGUAGES: { value: AppLocale; label: string }[] = [
@@ -36,7 +38,10 @@ const AVAILABLE_LANGUAGES: { value: AppLocale; label: string }[] = [
 ];
 
 export default function SettingsScreen() {
-    const { user, logout } = useAuth();
+    const { user, logout, twoFactorStatus } = useAuth();
+
+    // null mientras se consulta: evita mostrar "Desactivada" antes de saberlo.
+    const [twoFactorOn, setTwoFactorOn] = React.useState<boolean | null>(null);
     const { t, appLocale, setAppLocale } = useLanguage();
     const menuItems = buildMenuItems(t);
     const { voiceId, setVoiceId, audioMap, setAudioMap } = useStory();
@@ -69,7 +74,12 @@ export default function SettingsScreen() {
       React.useCallback(() => {
         let active = true;
         loadNamedVoices().then((v) => { if (active) setNamedVoices(v); });
+        // Al volver de la pantalla de 2FA el estado pudo cambiar.
+        twoFactorStatus().then((r) => {
+          if (active && r.ok && r.data) setTwoFactorOn(r.data.enabled);
+        });
         return () => { active = false; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [])
     );
 
@@ -166,31 +176,33 @@ export default function SettingsScreen() {
       [playPreview],
     );
 
-    const handleDeleteNamedVoice = React.useCallback((v: NamedVoiceData) => {
-      Alert.alert(
-        'Borrar grabación',
-        `¿Borrar la voz "${v.label}"? Vas a poder volver a grabarla cuando quieras.`,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          {
-            text: 'Borrar', style: 'destructive', onPress: async () => {
-              const composedId = `custom:${v.id}`;
-              // La cascada limpia tambien la narracion ya generada con esa voz y la preferencia
-              // global; el estado en memoria (local y del cuento activo) lo sincronizamos aca.
-              const result = await deleteNamedVoiceCascade(v.id, {
-                // Si la voz borrada estaba activa en cualquiera de los dos lados, hay que resetear.
-                currentVoiceId: selectedVoice === composedId || voiceId === composedId ? composedId : selectedVoice,
-                audioMap,
-              });
-              setNamedVoices((prev) => prev.filter((x) => x.id !== v.id));
-              setAudioMap(result.audioMap);
-              if (selectedVoice === composedId) setSelectedVoice(result.nextVoiceId);
-              if (voiceId === composedId) setVoiceId(result.nextVoiceId);
-            }
-          },
-        ],
-      );
-    }, [selectedVoice, audioMap, setAudioMap, voiceId, setVoiceId]);
+    const handleDeleteNamedVoice = React.useCallback(async (v: NamedVoiceData) => {
+      const confirmed = await feedback.dialog({
+        kind: 'warning',
+        title: t.msg_delete_voice_title,
+        message: fmt(t.msg_delete_voice_msg, { label: v.label }),
+        cancelLabel: t.msg_cancel,
+        confirmLabel: t.msg_delete,
+        destructive: true,
+      });
+      if (!confirmed) return;
+      const composedId = `custom:${v.id}`;
+      try {
+        // La cascada limpia tambien la narracion ya generada con esa voz y la preferencia
+        // global; el estado en memoria (local y del cuento activo) lo sincronizamos aca.
+        const result = await deleteNamedVoiceCascade(v.id, {
+          // Si la voz borrada estaba activa en cualquiera de los dos lados, hay que resetear.
+          currentVoiceId: selectedVoice === composedId || voiceId === composedId ? composedId : selectedVoice,
+          audioMap,
+        });
+        setNamedVoices((prev) => prev.filter((x) => x.id !== v.id));
+        setAudioMap(result.audioMap);
+        if (selectedVoice === composedId) setSelectedVoice(result.nextVoiceId);
+        if (voiceId === composedId) setVoiceId(result.nextVoiceId);
+      } catch (e: any) {
+        feedback.error(t.msg_delete_voice_failed_title, e?.message || t.msg_retry_hint);
+      }
+    }, [selectedVoice, audioMap, setAudioMap, voiceId, setVoiceId, t]);
 
     return (
         <View style={{ flex: 1, backgroundColor: THEME.bgTop }}>
@@ -208,6 +220,15 @@ export default function SettingsScreen() {
                         icon="lock"
                         label={t.settings_change_password}
                         onPress={() => router.push('/change-password')}
+                    />
+
+                    <MenuItem
+                        icon="shield"
+                        label={t.settings_two_factor}
+                        value={twoFactorOn === null
+                            ? undefined
+                            : twoFactorOn ? t.settings_two_factor_on : t.settings_two_factor_off}
+                        onPress={() => router.push('/two-factor')}
                     />
 
                     <View style={{ height: 1, backgroundColor: THEME.border, marginVertical: 10 }} />
@@ -367,7 +388,7 @@ export default function SettingsScreen() {
     );
 }
 
-function MenuItem({ icon, label, onPress, danger }: { icon: any; label: string; onPress: () => void; danger?: boolean }) {
+function MenuItem({ icon, label, onPress, danger, value }: { icon: any; label: string; onPress: () => void; danger?: boolean; value?: string }) {
     return (
         <TouchableOpacity
             onPress={onPress}
@@ -380,6 +401,9 @@ function MenuItem({ icon, label, onPress, danger }: { icon: any; label: string; 
             <Feather name={icon} size={20} color={danger ? 'red' : THEME.text} style={{ marginRight: 12 }} />
             <Text style={{ color: danger ? 'red' : THEME.text, fontSize: 16 }}>{label}</Text>
             <View style={{ flex: 1 }} />
+            {value ? (
+                <Text style={{ color: THEME.textDim, marginRight: 8 }}>{value}</Text>
+            ) : null}
             <Feather name="chevron-right" size={20} color={THEME.textDim} />
         </TouchableOpacity>
     );

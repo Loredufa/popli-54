@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useFocusEffect } from '@react-navigation/native';
 import * as React from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Share, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, Share, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAuth } from '../src/auth/AuthProvider';
 import AppNavbar from '../src/components/AppNavbar';
@@ -13,6 +13,8 @@ import NarratorPicker, { type NarratorVoice } from '../src/components/NarratorPi
 import StoryReader from '../src/components/StoryReader';
 import { buildMenuItems } from '../src/constants/menu';
 import { useLanguage } from '../src/i18n/LanguageContext';
+import { fmt } from '../src/i18n/format';
+import { feedback } from '../src/ui/feedback';
 import { getNarrationLocale } from '../src/lib/narrationLocale';
 import { usePlayback } from '../src/story/PlaybackContext';
 import { clearCurrentSession } from '../src/lib/storage';
@@ -78,11 +80,11 @@ export default function StoryAudioScreen() {
       await logout();
       router.replace('/login');
     } catch (e: any) {
-      Alert.alert('Error al cerrar sesion', e?.message || 'Intentalo de nuevo.');
+      feedback.error(t.msg_logout_failed_title, e?.message || t.msg_retry_hint);
     } finally {
       setLoggingOut(false);
     }
-  }, [logout, loggingOut, clearStory]);
+  }, [logout, loggingOut, clearStory, t]);
 
   React.useEffect(() => {
     return () => {
@@ -176,10 +178,10 @@ export default function StoryAudioScreen() {
 
   const handleNarrationDownload = React.useCallback(async () => {
     if (Platform.OS === 'web') {
-      Alert.alert('Usa la app móvil', 'La descarga de audio funciona en dispositivo o emulador, no en web.');
+      feedback.info(t.msg_mobile_only_title, t.msg_mobile_only_audio_download);
       return;
     }
-    if (!storyText?.trim()) { Alert.alert(t.alert_missing_story_title, t.alert_missing_story_msg); return; }
+    if (!storyText?.trim()) { feedback.warning(t.alert_missing_story_title, t.alert_missing_story_msg); return; }
     const currentVoiceId = voiceId || 'shimmer';
     const cleanedMap = sanitizeAudioMap(audioMap);
     if (Object.keys(cleanedMap).length !== Object.keys(audioMap).length) {
@@ -197,9 +199,9 @@ export default function StoryAudioScreen() {
       // el usuario lo puede borrar desde la galería, y ademas en iOS es un `ph://` que despues
       // no podemos copiar a la carpeta del cuento.
       setAudioMap((prev) => ({ ...prev, [currentVoiceId]: res.fileUri }));
-      Alert.alert(t.alert_narration_ready_title, t.alert_narration_ready_msg);
+      feedback.success(t.alert_narration_ready_title, t.alert_narration_ready_msg);
     } catch (e: any) {
-      Alert.alert('No se pudo narrar', e?.message || 'Intentalo de nuevo.');
+      feedback.error(t.msg_narration_failed_title, e?.message || t.msg_retry_hint);
     } finally {
       setAudioLoading(false);
     }
@@ -207,7 +209,7 @@ export default function StoryAudioScreen() {
 
   const handleShareAudio = React.useCallback(async () => {
     if (Platform.OS === 'web') {
-      Alert.alert('Usa la app móvil', 'Compartir audio funciona en dispositivo o emulador, no en web.');
+      feedback.info(t.msg_mobile_only_title, t.msg_mobile_only_audio_share);
       return;
     }
     const uri = audioMap[voiceId] || null;
@@ -222,7 +224,7 @@ export default function StoryAudioScreen() {
           return next;
         });
       }
-      Alert.alert(t.alert_no_audio_title, t.alert_no_audio_msg);
+      feedback.warning(t.alert_no_audio_title, t.alert_no_audio_msg);
       return;
     }
     try {
@@ -235,7 +237,7 @@ export default function StoryAudioScreen() {
         await Share.share({ message: dialogTitle });
       }
     } catch (e: any) {
-      Alert.alert('No se pudo compartir', e?.message || 'Intentalo de nuevo.');
+      feedback.error(t.msg_share_failed_title, e?.message || t.msg_retry_hint);
     }
   }, [audioMap, voiceId, theme, t]);
 
@@ -298,46 +300,42 @@ export default function StoryAudioScreen() {
       });
     } catch (e: any) {
       if (runId !== previewRunIdRef.current) return;
-      Alert.alert('No se pudo reproducir la voz', e?.message || 'Intentalo de nuevo.');
+      feedback.error(t.msg_voice_preview_failed_title, e?.message || t.msg_retry_hint);
       setPreviewing(null);
     }
-  }, [voiceList, previewing, stopPreview]);
+  }, [voiceList, previewing, stopPreview, t]);
 
-  const handleDeleteVoice = React.useCallback((voice: NarratorVoice) => {
+  const handleDeleteVoice = React.useCallback(async (voice: NarratorVoice) => {
     const namedId = voice.id.replace(/^custom:/, '');
-    Alert.alert(
-      'Borrar grabación',
-      `¿Borrar la voz "${voice.label}"? Vas a poder volver a grabarla cuando quieras.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Borrar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const result = await deleteNamedVoiceCascade(namedId, {
-                currentVoiceId: voiceId,
-                audioMap,
-              });
-              setNamedVoices((prev) => prev.filter((v) => v.id !== namedId));
-              setAudioMap(result.audioMap);
-              if (result.preferenceReset) setVoiceId(result.nextVoiceId);
-            } catch (e: any) {
-              Alert.alert('No se pudo borrar', e?.message || 'Intentalo de nuevo.');
-            }
-          },
-        },
-      ],
-    );
-  }, [voiceId, audioMap, setAudioMap, setVoiceId]);
+    const confirmed = await feedback.dialog({
+      kind: 'warning',
+      title: t.msg_delete_voice_title,
+      message: fmt(t.msg_delete_voice_msg, { label: voice.label }),
+      cancelLabel: t.msg_cancel,
+      confirmLabel: t.msg_delete,
+      destructive: true,
+    });
+    if (!confirmed) return;
+    try {
+      const result = await deleteNamedVoiceCascade(namedId, {
+        currentVoiceId: voiceId,
+        audioMap,
+      });
+      setNamedVoices((prev) => prev.filter((v) => v.id !== namedId));
+      setAudioMap(result.audioMap);
+      if (result.preferenceReset) setVoiceId(result.nextVoiceId);
+    } catch (e: any) {
+      feedback.error(t.msg_delete_voice_failed_title, e?.message || t.msg_retry_hint);
+    }
+  }, [voiceId, audioMap, setAudioMap, setVoiceId, t]);
 
   const handleSaveStory = React.useCallback(async () => {
     if (savingStory) return;
     if (Platform.OS === 'web') {
-      Alert.alert('Usa la app móvil', 'Guardar el cuento completo funciona en dispositivo o emulador, no en web.');
+      feedback.info(t.msg_mobile_only_title, t.msg_mobile_only_save);
       return;
     }
-    if (!storyText?.trim()) { Alert.alert(t.alert_missing_story_title, t.alert_missing_story_msg); return; }
+    if (!storyText?.trim()) { feedback.warning(t.alert_missing_story_title, t.alert_missing_story_msg); return; }
     setSavingStory(true);
     try {
       const voiceLabels: Record<string, string> = {};
@@ -353,18 +351,16 @@ export default function StoryAudioScreen() {
         musicTrackId: music.currentTrack.id,
       });
       setSavedId(entry.id);
-      Alert.alert(
-        'Cuento guardado',
-        entry.hasAudio
-          ? 'Lo vas a encontrar en "Cuentos guardados", listo para volver a escucharlo.'
-          : 'Lo vas a encontrar en "Cuentos guardados". Todavía no tiene narración: generala y volvé a guardar.',
+      feedback.success(
+        t.msg_story_saved_title,
+        entry.hasAudio ? t.msg_story_saved_with_audio : t.msg_story_saved_without_audio,
       );
     } catch (e: any) {
       const message = e?.message || 'No se pudo guardar el cuento.';
       if (typeof message === 'string' && message.toLowerCase().includes('sqlite_full')) {
-        Alert.alert('Sin espacio', 'Tu biblioteca está llena. Borrá cuentos guardados o liberá espacio en el dispositivo.');
+        feedback.error(t.msg_no_space_title, t.msg_no_space_msg);
       } else {
-        Alert.alert('Ups', message);
+        feedback.error(t.msg_save_failed_title, message);
       }
     } finally {
       setSavingStory(false);

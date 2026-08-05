@@ -7,7 +7,7 @@ import * as Sharing from 'expo-sharing';
 import { router, type Href } from 'expo-router';
 import * as React from 'react';
 import {
-  ActivityIndicator, Alert, Image, Pressable, ScrollView, Share, Text, TextInput, View, Platform,
+  ActivityIndicator, Image, Pressable, ScrollView, Share, Text, TextInput, View, Platform,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAuth } from '../src/auth/AuthProvider';
@@ -31,6 +31,9 @@ import type {
 } from '../src/story/types';
 import { sceneKeyForSlot } from '../src/story/types';
 import { buildIllustrationPlan, splitStoryParagraphs } from '../src/story/plan';
+import { buildStoryHtml, escapeHtml, type StoryPdfImage } from '../src/story/pdfTemplate';
+import { fmt } from '../src/i18n/format';
+import { feedback } from '../src/ui/feedback';
 import { stripNarrationCues } from '../src/story/text';
 
 const ILLUSTRATION_WAIT_MESSAGES = [
@@ -194,19 +197,6 @@ async function callIllustrations(payload: {
   return { images: Array.isArray(images) ? images : [], plan: plan ?? null, synopsis: synopsis ?? null };
 }
 
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function toImprenta(text: string) {
-  return (text || '').toLocaleUpperCase('es-ES');
-}
 
 const BRAND_SUFFIX = 'by PopliLandia';
 
@@ -502,10 +492,8 @@ export default function MakerScreen() {
   const createStoryHtml = React.useCallback(async () => {
     const baseTitle = theme?.trim() || DEFAULT_STORY_TITLE;
     const displayTitle = `${baseTitle} ${BRAND_SUFFIX}`;
-    const displayTitleUpper = toImprenta(displayTitle);
-    const escapedDisplayTitle = escapeHtml(displayTitleUpper);
 
-    const imagesForSections: Array<{ dataUri: string; label: string } | null> = [];
+    const imagesForSections: Array<StoryPdfImage | null> = [];
     for (const [idx, item] of planWithResults.entries()) {
       if (!item.uri) {
         imagesForSections.push(null);
@@ -521,140 +509,13 @@ export default function MakerScreen() {
     }
 
     const paragraphSource = paragraphs.length ? paragraphs : (displayText ? [displayText.trim()] : []);
-    const paragraphBlocks = paragraphSource
-      .map((block) => `<p class="paragraph">${escapeHtml(toImprenta(block))}</p>`);
 
-    // Stars: golden-angle distribution for uniform coverage
-    const makeStarsSvg = (count: number) => {
-      const circles = Array.from({ length: count }, (_, i) => {
-        const cx = ((i * 137.508) % 100).toFixed(1);
-        const cy = ((i * 73.137) % 100).toFixed(1);
-        const r  = [0.7, 1, 1.2, 1.5, 0.8][i % 5];
-        const op = [0.35, 0.55, 0.7, 0.85, 0.5, 0.65][i % 6];
-        const fill = i % 8 === 0 ? '#9fd2ff' : i % 5 === 0 ? '#c8e8ff' : 'white';
-        return `<circle cx="${cx}%" cy="${cy}%" r="${r}" fill="${fill}" opacity="${op}"/>`;
-      }).join('');
-      return `<div class="stars"><svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">${circles}</svg></div>`;
-    };
-    const STARS = makeStarsSvg(55);
-
-    const CSS = `
-    @page { size: A4; margin: 15mm 18mm; }
-    * { box-sizing: border-box; }
-    body { font-family: "Arial Rounded MT Bold", "Trebuchet MS", "Comic Sans MS", sans-serif;
-           background: #0e1630; color: #e7eefc; margin: 0; padding: 0;
-           -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .page { page-break-after: always; min-height: 227mm;
-            display: flex; flex-direction: column; padding: 0;
-            position: relative; overflow: hidden;
-            background: linear-gradient(160deg, #0e1630 0%, #162040 55%, #0a1220 100%);
-            -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .stars { position: absolute; inset: 0; width: 100%; height: 100%;
-             pointer-events: none; z-index: 0; }
-    .glow { position: absolute; border-radius: 50%; pointer-events: none; z-index: 0;
-            filter: blur(40px); -webkit-filter: blur(40px); }
-    .glow-center { width: 280px; height: 280px; top: 30%; left: 50%;
-                   transform: translate(-50%, -50%);
-                   background: radial-gradient(circle, rgba(90,160,255,0.18) 0%, transparent 70%); }
-    .glow-bottom { width: 200px; height: 160px; bottom: 10%; right: 15%;
-                   background: radial-gradient(circle, rgba(90,160,255,0.1) 0%, transparent 70%); }
-    .page-inner { position: relative; z-index: 1; display: flex; flex-direction: column;
-                  flex: 1; min-height: 227mm; padding: 0; }
-    .cover { align-items: center; text-align: center; padding: 22mm 12mm 16mm; gap: 8mm; }
-    .cover-title { font-size: 38px; font-weight: 900; letter-spacing: 2px;
-                   text-transform: uppercase; color: #e7eefc; line-height: 1.2;
-                   margin: 0 0 8px 0;
-                   text-shadow: 0 0 24px rgba(90,160,255,0.6), 0 2px 8px rgba(0,0,0,0.9); }
-    .cover-brand { font-size: 15px; font-weight: 700; letter-spacing: 4px;
-                   text-transform: uppercase; color: #9fd2ff; margin: 0; }
-    .cover-image { max-width: 260px; margin: 10mm auto 0; border-radius: 16px; overflow: hidden;
-                   border: 2px solid rgba(90,160,255,0.45);
-                   box-shadow: 0 0 24px rgba(90,160,255,0.25); }
-    .cover-image img { width: 100%; height: auto; display: block; border-radius: 14px; }
-    .story-page .page-inner { justify-content: flex-start; }
-    .image-wrap { width: 100%; border-radius: 16px; overflow: hidden; margin-bottom: 8mm;
-                  border: 2px solid rgba(90,160,255,0.3);
-                  box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
-    .image-wrap img { width: 100%; height: auto; display: block; }
-    .image-wrap-bottom { margin-bottom: 0; margin-top: 8mm; }
-    .text-block { flex: 1; }
-    .paragraph { font-size: 26px; font-weight: 800; letter-spacing: 1.5px;
-                 line-height: 1.65; text-transform: uppercase; margin: 0 0 10px 0;
-                 color: #e7eefc;
-                 text-shadow: 0 1px 6px rgba(0,0,0,0.7); }
-    .page-num { font-size: 13px; font-weight: 700; letter-spacing: 3px;
-                text-transform: uppercase; color: #9fd2ff; text-align: center;
-                margin-top: auto; padding-top: 6mm; }
-    `;
-
-    const pages: string[] = [];
-
-    // Portada
-    const coverImg = imagesForSections[0];
-    pages.push(`
-      <div class="page cover">
-        ${STARS}
-        <div class="glow glow-center"></div>
-        <div class="glow glow-bottom"></div>
-        <div class="page-inner cover">
-          <p class="cover-title">${escapedDisplayTitle}</p>
-          <p class="cover-brand">✦ POPLI ✦</p>
-          ${coverImg ? `<div class="cover-image"><img src="${coverImg.dataUri}" alt="portada" /></div>` : ''}
-        </div>
-      </div>
-    `);
-
-    if (!paragraphBlocks.length) {
-      pages.push(`
-        <div class="page story-page">
-          ${STARS}
-          <div class="page-inner"><p class="paragraph">CUENTO SIN CONTENIDO.</p></div>
-        </div>
-      `);
-    } else {
-      const totalSections = 3;
-      const totalParagraphs = paragraphBlocks.length;
-      const baseCount = Math.floor(totalParagraphs / totalSections);
-      const remainder = totalParagraphs % totalSections;
-      let cursor = 0;
-
-      for (let i = 0; i < totalSections; i += 1) {
-        const take = baseCount + (i < remainder ? 1 : 0);
-        const slice = paragraphBlocks.slice(cursor, cursor + take);
-        cursor += take;
-        const textHtml = slice.length ? slice.join('\n') : '';
-        const img = imagesForSections[i];
-        const imageOnTop = i !== 1;
-        const imageBlock = img
-          ? `<div class="image-wrap${imageOnTop ? '' : ' image-wrap-bottom'}"><img src="${img.dataUri}" alt="${img.label}" /></div>`
-          : '';
-        pages.push(`
-          <div class="page story-page">
-            ${STARS}
-            <div class="glow glow-bottom"></div>
-            <div class="page-inner">
-              ${imageOnTop ? imageBlock : ''}
-              <div class="text-block">${textHtml}</div>
-              ${!imageOnTop ? imageBlock : ''}
-              <div class="page-num">${i + 1}</div>
-            </div>
-          </div>
-        `);
-      }
-    }
-
-    return `<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8" />
-  <title>${escapedDisplayTitle}</title>
-  <style>${CSS}</style>
-</head>
-<body>
-  ${pages.join('\n')}
-</body>
-</html>`;
-  }, [paragraphs, displayText, planWithResults, theme, meta, storyText]);
+    return buildStoryHtml({
+      title: displayTitle,
+      paragraphs: paragraphSource,
+      images: imagesForSections,
+    });
+  }, [paragraphs, displayText, planWithResults, theme]);
 
   const exportStoryPdf = React.useCallback(async () => {
     if (!storyText?.trim()) throw new Error('No hay cuento para exportar.');
@@ -718,11 +579,11 @@ export default function MakerScreen() {
       await logout();
       router.replace(LOGIN_ROUTE);
     } catch (e: any) {
-      Alert.alert('Error al cerrar sesion', e?.message || 'Intentalo de nuevo.');
+      feedback.error(t.msg_logout_failed_title, e?.message || t.msg_retry_hint);
     } finally {
       setLoggingOut(false);
     }
-  }, [logout, loggingOut, clearStory]);
+  }, [logout, loggingOut, clearStory, t]);
 
   const handleShare = React.useCallback(async () => {
     if (!storyText || exportingPdf) return;
@@ -732,7 +593,7 @@ export default function MakerScreen() {
       const dialogTitle = `${baseTitle} ${BRAND_SUFFIX}`;
       const shareMessage = `${dialogTitle}\n\n${displayText}`;
       if (Platform.OS === 'web' || !pdfUri) {
-        Alert.alert('Abre el PDF', 'Se abrio la opcion del navegador para guardar/imprimir tu cuento en PDF.');
+        feedback.info(t.msg_pdf_web_title, t.msg_pdf_web_msg);
         return;
       }
       const canShareFile = await Sharing.isAvailableAsync();
@@ -745,9 +606,9 @@ export default function MakerScreen() {
         await Share.share({ message: shareMessage });
       }
     } catch (e: any) {
-      Alert.alert('No se pudo compartir', e?.message || 'Error desconocido');
+      feedback.error(t.msg_share_failed_title, e?.message || t.msg_unknown_error);
     }
-  }, [storyText, displayText, exportStoryPdf, hasIllustrations, theme, exportingPdf]);
+  }, [storyText, displayText, exportStoryPdf, hasIllustrations, theme, exportingPdf, t]);
 
   // Guardar = armar la carpeta del cuento en la biblioteca (texto, ilustraciones, PDF, musica y
   // narracion ya generada). Compartir es otra cosa y vive en handleShare: antes este boton hacia
@@ -757,9 +618,9 @@ export default function MakerScreen() {
     if (Platform.OS === 'web') {
       try {
         await exportStoryPdf();
-        Alert.alert('Descarga tu PDF', 'Usa la opcion "Guardar como PDF" que abrio el navegador.');
+        feedback.info(t.msg_pdf_download_title, t.msg_pdf_download_msg);
       } catch (err: any) {
-        Alert.alert('Ups', err?.message || 'No se pudo guardar el cuento.');
+        feedback.error(t.msg_save_failed_title, err?.message || t.msg_retry_hint);
       }
       return;
     }
@@ -782,24 +643,22 @@ export default function MakerScreen() {
         exportPdf: exportStoryPdf,
       });
       setSavedId(entry.id);
-      Alert.alert(
-        'Cuento guardado',
-        entry.hasAudio
-          ? 'Ya esta en "Cuentos guardados", listo para volver a escucharlo.'
-          : 'Ya esta en "Cuentos guardados". Todavia no tiene narracion: generala en "Musica y narrador" y volve a guardar.',
+      feedback.success(
+        t.msg_story_saved_title,
+        entry.hasAudio ? t.msg_story_saved_with_audio : t.msg_story_saved_without_audio,
       );
     } catch (err: any) {
       console.warn('saveStory failed', err);
-      const message = err?.message || 'No se pudo guardar el cuento.';
+      const message = err?.message || t.msg_retry_hint;
       if (typeof message === 'string' && message.toLowerCase().includes('sqlite_full')) {
-        Alert.alert('Sin espacio', 'Tu biblioteca esta llena. Borra cuentos guardados o libera espacio en el dispositivo.');
+        feedback.error(t.msg_no_space_title, t.msg_no_space_msg);
       } else {
-        Alert.alert('Ups', message);
+        feedback.error(t.msg_save_failed_title, message);
       }
     } finally {
       setSavingStory(false);
     }
-  }, [storyText, displayText, exportingPdf, savingStory, meta, illustrations, audioMap, musicTrackId, savedId, setSavedId, exportStoryPdf, theme]);
+  }, [storyText, displayText, exportingPdf, savingStory, meta, illustrations, audioMap, musicTrackId, savedId, setSavedId, exportStoryPdf, theme, t]);
 
   const onGenerate = React.useCallback(async () => {
     setLoading(true);
@@ -831,12 +690,12 @@ export default function MakerScreen() {
       const plan = buildIllustrationPlan(storyOnly);
       setIllustrationPlan(plan);
     } catch (e: any) {
-      Alert.alert('No se pudo generar', e?.message || 'Error desconocido');
+      feedback.error(t.msg_story_failed_title, e?.message || t.msg_unknown_error);
     } finally { setLoading(false); }
-  }, [ageRange, theme, skill, characters, locale, minutes, storyLanguage, category, genre, setSavedId]);
+  }, [ageRange, theme, skill, characters, locale, minutes, storyLanguage, category, genre, setSavedId, t]);
 
   const onIllustrate = React.useCallback(async () => {
-    if (!storyText) { Alert.alert(t.alert_missing_story_title, t.alert_missing_story_msg); return; }
+    if (!storyText) { feedback.warning(t.alert_missing_story_title, t.alert_missing_story_msg); return; }
     const plan = illustrationPlan.length ? illustrationPlan : buildIllustrationPlan(displayText);
     setIllustrationPlan(plan);
     const effectiveTheme = theme || 'cuento infantil';
@@ -885,7 +744,7 @@ ${displayText.slice(0, 900)}`,
     const middleScene = plan.find((s) => s.slot === 'conflict');
     const endScene = plan.find((s) => s.slot === 'resolution');
     if (!introScene || !middleScene || !endScene) {
-      Alert.alert('No se pudieron generar imagenes', 'El plan de ilustraciones esta incompleto.');
+      feedback.error(t.msg_illustrations_failed_title, t.msg_illustrations_plan_incomplete);
       return;
     }
 
@@ -921,14 +780,17 @@ ${displayText.slice(0, 900)}`,
 
       const failedCount = [middleResult, endResult].filter((r) => r.status === 'rejected').length;
       if (failedCount > 0) {
-        Alert.alert('Algunas ilustraciones fallaron', `No se pudieron generar ${failedCount} de 3 escenas. Toca "Reilustrar" para reintentar.`);
+        feedback.warning(
+          t.msg_illustrations_partial_title,
+          fmt(t.msg_illustrations_partial_msg, { failed: failedCount, total: 3 }),
+        );
       }
     } catch (e: any) {
-      Alert.alert('No se pudieron generar imagenes', e?.message || 'Error');
+      feedback.error(t.msg_illustrations_failed_title, e?.message || t.msg_retry_hint);
     } finally {
       setIllustrationLoading({ intro: false, conflict: false, resolution: false });
     }
-  }, [storyText, displayText, ageRange, theme, skill, characters, locale, illustrationPlan]);
+  }, [storyText, displayText, ageRange, theme, skill, characters, locale, illustrationPlan, t]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

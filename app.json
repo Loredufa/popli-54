@@ -39,7 +39,8 @@
           }
         }
       ],
-      "expo-localization"
+      "expo-localization",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -53,6 +54,13 @@
       "REGISTER_PATH": "/api/register",
       "FORGOT_PATH": "/api/auth/request-reset",
       "RESET_PASSWORD_PATH": "/api/auth/reset-password",
+      "CHANGE_PASSWORD_PATH": "/api/auth/change-password",
+      "TWOFA_SETUP_PATH": "/api/auth/2fa/setup",
+      "TWOFA_ENABLE_PATH": "/api/auth/2fa/enable",
+      "TWOFA_VERIFY_PATH": "/api/auth/2fa/verify-login",
+      "TWOFA_STATUS_PATH": "/api/auth/2fa/status",
+      "TWOFA_DISABLE_PATH": "/api/auth/2fa/disable",
+      "TWOFA_BACKUP_REGEN_PATH": "/api/auth/2fa/backup-codes/regenerate",
       "ME_PATH": "/api/me",
       "PROFILE_PATH": "/api/profile",
       "LOGOUT_PATH": "/api/logout",

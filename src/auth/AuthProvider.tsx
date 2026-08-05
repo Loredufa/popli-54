@@ -1,7 +1,8 @@
 // src/auth/AuthProvider.tsx
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { clearToken as borrarToken, getToken as leerToken, setToken as guardarToken } from './tokenStore';
 
 /** ====== Rutas del backend tomadas de app.json (expo.extra) ====== */
 const EXTRA = (Constants.expoConfig?.extra as any) || {};
@@ -11,9 +12,18 @@ const LOGIN_PATH = EXTRA.LOGIN_PATH || '/api/login';
 const REGISTER_PATH = EXTRA.REGISTER_PATH || '/api/register';
 const FORGOT_PATH = EXTRA.FORGOT_PATH || '/api/forgot-password';
 const RESET_PASSWORD_PATH = EXTRA.RESET_PASSWORD_PATH || '/api/auth/reset-password';
+const CHANGE_PASSWORD_PATH = EXTRA.CHANGE_PASSWORD_PATH || '/api/auth/change-password';
 const ME_PATH = EXTRA.ME_PATH || '/api/me';
 const PROFILE_PATH = EXTRA.PROFILE_PATH || '/api/profile';
 const LOGOUT_PATH = EXTRA.LOGOUT_PATH || '/api/logout';
+
+const TWOFA_SETUP_PATH = EXTRA.TWOFA_SETUP_PATH || '/api/auth/2fa/setup';
+const TWOFA_ENABLE_PATH = EXTRA.TWOFA_ENABLE_PATH || '/api/auth/2fa/enable';
+const TWOFA_VERIFY_PATH = EXTRA.TWOFA_VERIFY_PATH || '/api/auth/2fa/verify-login';
+const TWOFA_STATUS_PATH = EXTRA.TWOFA_STATUS_PATH || '/api/auth/2fa/status';
+const TWOFA_DISABLE_PATH = EXTRA.TWOFA_DISABLE_PATH || '/api/auth/2fa/disable';
+const TWOFA_BACKUP_REGEN_PATH =
+  EXTRA.TWOFA_BACKUP_REGEN_PATH || '/api/auth/2fa/backup-codes/regenerate';
 
 /** ====== Tipos ====== */
 export type User = {
@@ -34,20 +44,42 @@ export type RegisterForm = {
   password: string;
 };
 
+export type Resultado = { ok: boolean; error?: string };
+
+/** El login puede terminar en sesión o en "falta el segundo factor". */
+export type ResultadoLogin = Resultado & { mfaRequired?: boolean };
+
+export type EstadoTwoFactor = {
+  enabled: boolean;
+  confirmedAt: string | null;
+  backupCodesRemaining: number;
+};
+
+export type SetupTwoFactor = { secret: string; otpauthUri: string };
+
 type AuthContextType = {
   user: User | null;
   token: string | null;
   loading: boolean;
   /** Auth */
-  login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  register: (form: RegisterForm) => Promise<{ ok: boolean; error?: string }>;
+  login: (email: string, password: string) => Promise<ResultadoLogin>;
+  register: (form: RegisterForm) => Promise<Resultado>;
   logout: () => Promise<void>;
-  forgotPassword: (email: string) => Promise<{ ok: boolean; error?: string }>;
-  resetPassword: (email: string, code: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>;
+  forgotPassword: (email: string) => Promise<Resultado>;
+  resetPassword: (email: string, code: string, newPassword: string) => Promise<Resultado>;
   /** Perfil */
   refreshMe: () => Promise<void>;
-  updateProfile: (patch: Record<string, any>) => Promise<{ ok: boolean; error?: string }>;
-  changePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>;
+  updateProfile: (patch: Record<string, any>) => Promise<Resultado>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<Resultado>;
+  /** 2FA */
+  hayDesafioPendiente: () => boolean;
+  verifyTwoFactor: (code: string, type?: 'totp' | 'backup_code') => Promise<Resultado>;
+  cancelTwoFactor: () => void;
+  twoFactorStatus: () => Promise<Resultado & { data?: EstadoTwoFactor }>;
+  twoFactorSetup: () => Promise<Resultado & { data?: SetupTwoFactor }>;
+  twoFactorEnable: (code: string) => Promise<Resultado & { backupCodes?: string[] }>;
+  twoFactorDisable: (password: string) => Promise<Resultado>;
+  regenerateBackupCodes: (password: string) => Promise<Resultado & { backupCodes?: string[] }>;
 };
 
 const AuthContext = createContext<AuthContextType>({
@@ -62,10 +94,20 @@ const AuthContext = createContext<AuthContextType>({
   refreshMe: async () => { },
   updateProfile: async () => ({ ok: false, error: 'AuthProvider no inicializado' }),
   changePassword: async () => ({ ok: false, error: 'AuthProvider no inicializado' }),
+  hayDesafioPendiente: () => false,
+  verifyTwoFactor: async () => ({ ok: false, error: 'AuthProvider no inicializado' }),
+  cancelTwoFactor: () => { },
+  twoFactorStatus: async () => ({ ok: false, error: 'AuthProvider no inicializado' }),
+  twoFactorSetup: async () => ({ ok: false, error: 'AuthProvider no inicializado' }),
+  twoFactorEnable: async () => ({ ok: false, error: 'AuthProvider no inicializado' }),
+  twoFactorDisable: async () => ({ ok: false, error: 'AuthProvider no inicializado' }),
+  regenerateBackupCodes: async () => ({ ok: false, error: 'AuthProvider no inicializado' }),
 });
 
 /** ====== Helpers HTTP ====== */
-const STORAGE_TOKEN = 'auth_token';
+/** El token ya no vive acá: lo maneja tokenStore (SecureStore, con migración
+ *  perezosa desde AsyncStorage). El perfil sí sigue en AsyncStorage — no es
+ *  secreto y en Android puede pasar el límite de tamaño de SecureStore. */
 const STORAGE_USER = 'auth_user';
 
 function baseTo(path: string) {
@@ -115,12 +157,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoad] = useState(true);
 
-  // Restaurar sesión al abrir
+  /**
+   * Token del desafío de 2FA: contraseña ya validada, falta el segundo factor.
+   *
+   * Va en un ref y NO en storage ni en params de navegación. Con
+   * `web.output: "static"`, pasarlo por `router.push({ params })` lo dejaría
+   * visible en la URL. Además muere si se cierra la app, que con un TTL de 5
+   * minutos es exactamente lo que se quiere.
+   */
+  const mfaToken = useRef<string | null>(null);
+
+  // Restaurar sesión al abrir. Acá es donde ocurre la migración del token
+  // desde AsyncStorage a SecureStore, de forma transparente.
   useEffect(() => {
     (async () => {
       try {
         const [tk, usr] = await Promise.all([
-          AsyncStorage.getItem(STORAGE_TOKEN),
+          leerToken(),
           AsyncStorage.getItem(STORAGE_USER),
         ]);
         if (tk) setToken(tk);
@@ -136,8 +189,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function persistSession(nextToken: string, nextUser: User) {
     setToken(nextToken);
     setUser(nextUser);
+    mfaToken.current = null;
     await Promise.all([
-      AsyncStorage.setItem(STORAGE_TOKEN, nextToken),
+      guardarToken(nextToken),
       AsyncStorage.setItem(STORAGE_USER, JSON.stringify(nextUser)),
     ]);
   }
@@ -145,8 +199,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function clearSession() {
     setToken(null);
     setUser(null);
+    mfaToken.current = null;
     await Promise.all([
-      AsyncStorage.removeItem(STORAGE_TOKEN),
+      borrarToken(),
       AsyncStorage.removeItem(STORAGE_USER),
     ]);
   }
@@ -154,15 +209,115 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   /** ====== Métodos de Auth ====== */
   const login: AuthContextType['login'] = async (email, password) => {
     try {
-      const data = await post<{ token: string; user: User }>(
+      const data = await post<{
+        token?: string;
+        user?: User;
+        mfaRequired?: boolean;
+        mfaToken?: string;
+      }>(
         LOGIN_PATH,
-        { email: email.trim(), password }
+        // toLowerCase igual que register/forgotPassword: sin esto, quien tipea
+        // el email con una mayuscula no matchea la fila y no puede entrar.
+        { email: email.trim().toLowerCase(), password }
       );
+
+      // Contraseña correcta pero falta el segundo factor. El backend responde
+      // 200 justamente para que esto no caiga en el catch.
+      if (data?.mfaRequired && data?.mfaToken) {
+        mfaToken.current = data.mfaToken;
+        return { ok: true, mfaRequired: true };
+      }
+
       if (!data?.token || !data?.user) throw new Error('Respuesta de login incompleta');
       await persistSession(data.token, data.user);
       return { ok: true };
     } catch (e: any) {
       return { ok: false, error: e.message || 'Error al iniciar sesión' };
+    }
+  };
+
+  /** ====== 2FA ====== */
+
+  const hayDesafioPendiente: AuthContextType['hayDesafioPendiente'] = () =>
+    mfaToken.current !== null;
+
+  const cancelTwoFactor: AuthContextType['cancelTwoFactor'] = () => {
+    mfaToken.current = null;
+  };
+
+  const verifyTwoFactor: AuthContextType['verifyTwoFactor'] = async (code, type) => {
+    if (!mfaToken.current) {
+      return { ok: false, error: 'La sesión expiró. Volvé a iniciar sesión.' };
+    }
+    try {
+      const data = await post<{ token: string; user: User }>(TWOFA_VERIFY_PATH, {
+        mfaToken: mfaToken.current,
+        code: code.trim(),
+        ...(type ? { type } : {}),
+      });
+      if (!data?.token || !data?.user) throw new Error('Respuesta incompleta');
+      await persistSession(data.token, data.user);
+      return { ok: true };
+    } catch (e: any) {
+      // Si el desafío se quemó (expirado o sin intentos), se descarta acá para
+      // que la pantalla pueda mandar al usuario de vuelta al login.
+      if (e.status === 401 && !/incorrecto/i.test(e.message ?? '')) {
+        mfaToken.current = null;
+      }
+      return { ok: false, error: e.message || 'No se pudo verificar el código' };
+    }
+  };
+
+  const twoFactorStatus: AuthContextType['twoFactorStatus'] = async () => {
+    try {
+      const data = await get<EstadoTwoFactor>(TWOFA_STATUS_PATH, token ?? undefined);
+      return { ok: true, data };
+    } catch (e: any) {
+      return { ok: false, error: e.message || 'No se pudo consultar el estado' };
+    }
+  };
+
+  const twoFactorSetup: AuthContextType['twoFactorSetup'] = async () => {
+    try {
+      const data = await post<SetupTwoFactor>(TWOFA_SETUP_PATH, {}, token ?? undefined);
+      return { ok: true, data };
+    } catch (e: any) {
+      return { ok: false, error: e.message || 'No se pudo iniciar la configuración' };
+    }
+  };
+
+  const twoFactorEnable: AuthContextType['twoFactorEnable'] = async (code) => {
+    try {
+      const data = await post<{ ok: true; backupCodes: string[] }>(
+        TWOFA_ENABLE_PATH,
+        { code: code.trim() },
+        token ?? undefined
+      );
+      return { ok: true, backupCodes: data.backupCodes };
+    } catch (e: any) {
+      return { ok: false, error: e.message || 'No se pudo activar' };
+    }
+  };
+
+  const twoFactorDisable: AuthContextType['twoFactorDisable'] = async (password) => {
+    try {
+      await post(TWOFA_DISABLE_PATH, { password }, token ?? undefined);
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: e.message || 'No se pudo desactivar' };
+    }
+  };
+
+  const regenerateBackupCodes: AuthContextType['regenerateBackupCodes'] = async (password) => {
+    try {
+      const data = await post<{ ok: true; backupCodes: string[] }>(
+        TWOFA_BACKUP_REGEN_PATH,
+        { password },
+        token ?? undefined
+      );
+      return { ok: true, backupCodes: data.backupCodes };
+    } catch (e: any) {
+      return { ok: false, error: e.message || 'No se pudieron regenerar los códigos' };
     }
   };
 
@@ -273,7 +428,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const changePassword: AuthContextType['changePassword'] = async (currentPassword, newPassword) => {
     try {
       if (!token) throw new Error('No hay sesión');
-      await post('/api/auth/change-password', { currentPassword, newPassword }, token);
+      await post(CHANGE_PASSWORD_PATH, { currentPassword, newPassword }, token);
       return { ok: true };
     } catch (e: any) {
       return { ok: false, error: e.message || 'No se pudo cambiar la contraseña' };
@@ -281,7 +436,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const value = useMemo(
-    () => ({ user, token, loading, login, register, logout, forgotPassword, resetPassword, refreshMe, updateProfile, changePassword }),
+    () => ({
+      user, token, loading,
+      login, register, logout, forgotPassword, resetPassword,
+      refreshMe, updateProfile, changePassword,
+      hayDesafioPendiente, cancelTwoFactor, verifyTwoFactor,
+      twoFactorStatus, twoFactorSetup, twoFactorEnable, twoFactorDisable,
+      regenerateBackupCodes,
+    }),
+    // Las funciones se redefinen en cada render pero solo dependen de `token`,
+    // que ya está en la lista. Incluirlas obligaría a memoizar las 15.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [user, token, loading]
   );
 

@@ -12,7 +12,6 @@
 // al cambiar de pantalla y el audio sigue sonando. Las pantallas ya no tienen estado de
 // reproducción: solo dibujan botones que llaman acá.
 import * as React from 'react';
-import { Alert } from 'react-native';
 import { Audio } from 'expo-av';
 import { useMusicPlayer } from '../lib/musicPlayer';
 import { fetchNarrationTemp } from '../lib/ttsClient';
@@ -20,6 +19,7 @@ import { localAssetExists } from '../lib/localAssets';
 import { loadNamedVoices } from '../lib/voicePrefs';
 import { getNarrationLocale } from '../lib/narrationLocale';
 import { useLanguage } from '../i18n/LanguageContext';
+import { feedback } from '../ui/feedback';
 import { useStory } from './StoryContext';
 
 export type NarrationStatus = 'idle' | 'loading' | 'playing' | 'paused';
@@ -46,7 +46,7 @@ const PlaybackContext = React.createContext<PlaybackContextType | null>(null);
 
 export function PlaybackProvider({ children }: { children: React.ReactNode }) {
   const { storyText, voiceId, audioMap, setAudioMap, musicTrackId, setMusicTrackId } = useStory();
-  const { appLocale } = useLanguage();
+  const { appLocale, t } = useLanguage();
 
   const music = useMusicPlayer({ initialTrackId: musicTrackId, onTrackChange: setMusicTrackId });
 
@@ -173,16 +173,14 @@ export function PlaybackProvider({ children }: { children: React.ReactNode }) {
     } catch (e: any) {
       if (runId !== runIdRef.current) return; // cancelado: el error ya no le importa a nadie
       const isAbort = e?.name === 'AbortError';
-      Alert.alert(
-        'Narracion',
-        isAbort
-          ? 'La generación de voz tardó demasiado. Intentá de nuevo.'
-          : (e?.message || 'No se pudo narrar el cuento.'),
+      feedback.error(
+        t.msg_narration_failed_title,
+        isAbort ? t.msg_narration_timeout_msg : (e?.message || t.msg_narration_generic_msg),
       );
       setStatus('idle');
       setStatusText(null);
     }
-  }, [storyText, voiceId, audioMap, setAudioMap, status, unload, resolveReferenceAudioUri, appLocale]);
+  }, [storyText, voiceId, audioMap, setAudioMap, status, unload, resolveReferenceAudioUri, appLocale, t]);
 
   const pause = React.useCallback(async () => {
     if (!soundRef.current) return;

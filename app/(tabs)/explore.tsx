@@ -1,13 +1,16 @@
 // app/(tabs)explore.tsx
 import React from 'react';
-import { Alert, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { useApi } from '../../src/api/useApi';
 import { AuthGate } from '../../src/auth/AuthProvider';
+import { useLanguage } from '../../src/i18n/LanguageContext';
+import { feedback } from '../../src/ui/feedback';
 import Card from '../../src/components/Card';
 import PrimaryButton from '../../src/components/PrimaryButton';
 
 export default function Explore() {
   const api = useApi();
+  const { t } = useLanguage();
   const [me, setMe] = React.useState<any>(null);
   const [loading, setLoading] = React.useState(true);
 
@@ -19,23 +22,23 @@ export default function Explore() {
         const profile = await api.get('/api/me');
         if (alive) setMe(profile);
       } catch (e: any) {
-        Alert.alert('Error al cargar perfil', e.message || 'No se pudo cargar /api/me');
+        feedback.error(t.msg_profile_load_failed_title, e?.message || t.msg_retry_hint);
       } finally {
         if (alive) setLoading(false);
       }
     })();
     return () => { alive = false; };
-  }, [api]);
+  }, [api, t]);
 
   const updateLanguage = async () => {
     try {
       await api.put('/api/profile', { language: 'es' });
-      Alert.alert('Listo', 'Idioma actualizado a ES');
+      feedback.success(t.msg_language_updated_title);
       // Opcional: refrescar los datos
       const profile = await api.get('/api/me');
       setMe(profile);
     } catch (e: any) {
-      Alert.alert('Error al actualizar', e.message || 'No se pudo actualizar /api/profile');
+      feedback.error(t.msg_profile_update_failed_title, e?.message || t.msg_retry_hint);
     }
   };
 

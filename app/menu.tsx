@@ -1,27 +1,34 @@
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React from 'react';
-import { Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../src/auth/AuthProvider';
 import Card from '../src/components/Card';
 import BrandLogo from '../src/components/BrandLogo';
 import { THEME } from '../src/theme';
+import { useLanguage } from '../src/i18n/LanguageContext';
+import { feedback } from '../src/ui/feedback';
 
 export default function MenuScreen() {
     const { logout, user } = useAuth();
+    const { t } = useLanguage();
 
     const handleLogout = async () => {
-        Alert.alert('Cerrar Sesión', '¿Estás seguro que querés salir?', [
-            { text: 'Cancelar', style: 'cancel' },
-            {
-                text: 'Salir',
-                style: 'destructive',
-                onPress: async () => {
-                    await logout();
-                    router.replace('/login');
-                },
-            },
-        ]);
+        const confirmed = await feedback.dialog({
+            kind: 'warning',
+            title: t.msg_logout_confirm_title,
+            message: t.msg_logout_confirm_msg,
+            cancelLabel: t.msg_cancel,
+            confirmLabel: t.msg_exit,
+            destructive: true,
+        });
+        if (!confirmed) return;
+        try {
+            await logout();
+            router.replace('/login');
+        } catch (e: any) {
+            feedback.error(t.msg_logout_failed_title, e?.message || t.msg_retry_hint);
+        }
     };
 
     return (

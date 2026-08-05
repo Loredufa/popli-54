@@ -1,7 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import * as React from 'react';
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import {
   loadNamedVoices,
   MAX_NAMED_VOICES,
@@ -11,6 +11,8 @@ import {
   type NamedVoiceData,
 } from '../lib/voicePrefs';
 import { THEME } from '../theme';
+import { useLanguage } from '../i18n/LanguageContext';
+import { feedback } from '../ui/feedback';
 
 const MIN_DURATION_SEC = 20;
 const MAX_DURATION_SEC = 60;
@@ -56,6 +58,7 @@ type Props = {
 };
 
 export default function VoiceRecorder({ onSaved, onCancel }: Props) {
+  const { t } = useLanguage();
   const [step, setStep] = React.useState<Step>('name');
   const [label, setLabel] = React.useState('');
   const [existingVoices, setExistingVoices] = React.useState<NamedVoiceData[]>([]);
@@ -109,7 +112,7 @@ export default function VoiceRecorder({ onSaved, onCancel }: Props) {
   const startRecording = React.useCallback(async () => {
     const perm = await Audio.requestPermissionsAsync();
     if (perm.status !== 'granted') {
-      Alert.alert('Permiso necesario', 'Necesitamos acceso al micrófono para grabar tu voz.');
+      feedback.warning(t.msg_mic_permission_title, t.msg_mic_permission_msg);
       return;
     }
     await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
@@ -138,7 +141,7 @@ export default function VoiceRecorder({ onSaved, onCancel }: Props) {
         return next;
       });
     }, 1000);
-  }, [stopRecording]);
+  }, [stopRecording, t]);
 
   const playPreview = React.useCallback(async () => {
     if (!recordingUri) return;
@@ -172,15 +175,15 @@ export default function VoiceRecorder({ onSaved, onCancel }: Props) {
       onSaved?.(voice);
     } catch (e: any) {
       if (e instanceof VoiceLimitError) {
-        Alert.alert('Límite alcanzado', e.message);
+        feedback.warning(t.msg_voice_limit_title, e.message);
       } else {
-        Alert.alert('No se pudo guardar', e?.message || 'Intentalo de nuevo.');
+        feedback.error(t.msg_voice_save_failed_title, e?.message || t.msg_retry_hint);
       }
       setStep('review');
     } finally {
       setSaving(false);
     }
-  }, [recordingUri, trimmedLabel, onSaved]);
+  }, [recordingUri, trimmedLabel, onSaved, t]);
 
   const withinRange = seconds >= MIN_DURATION_SEC && seconds <= MAX_DURATION_SEC;
 
@@ -203,10 +206,10 @@ export default function VoiceRecorder({ onSaved, onCancel }: Props) {
         style={{ color: THEME.text, borderColor: THEME.border, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 6 }}
       />
       {isDuplicate ? (
-        <Text style={{ color: '#ffb4b4', fontSize: 12, marginBottom: 10 }}>Ya tenés una voz con ese nombre.</Text>
+        <Text style={{ color: THEME.error, fontSize: 12, marginBottom: 10 }}>Ya tenés una voz con ese nombre.</Text>
       ) : null}
       {atCap ? (
-        <Text style={{ color: '#ffb4b4', fontSize: 12, marginBottom: 10 }}>
+        <Text style={{ color: THEME.error, fontSize: 12, marginBottom: 10 }}>
           Ya tenés {MAX_NAMED_VOICES} voces guardadas. Borrá una en "Mis voces" (Ajustes) para grabar otra.
         </Text>
       ) : null}
@@ -214,8 +217,7 @@ export default function VoiceRecorder({ onSaved, onCancel }: Props) {
       <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, borderWidth: 1, borderColor: THEME.border, padding: 14, marginBottom: 16 }}>
         <Text style={{ color: THEME.textDim, fontSize: 12, marginBottom: 6, fontWeight: '700' }}>CONTÁ ESTO EN VOZ ALTA</Text>
         <Text style={{ color: THEME.textDim, fontSize: 12, marginBottom: 10, lineHeight: 17 }}>
-          No lo leas como un texto: contalo como si se lo contaras a un chico. Si leés, la voz clonada
-          sale plana y sin acento.
+          Leelo como si leyeras un cuento. 
         </Text>
         <ScrollView style={{ maxHeight: 180 }}>
           <Text style={{ color: THEME.text, fontSize: 15, lineHeight: 22 }}>{READING_SCRIPT}</Text>
@@ -255,7 +257,7 @@ export default function VoiceRecorder({ onSaved, onCancel }: Props) {
             Grabaste {seconds}s. {withinRange ? '' : `Necesitás entre ${MIN_DURATION_SEC} y ${MAX_DURATION_SEC}s.`}
           </Text>
           {lowLevel ? (
-            <Text style={{ color: '#ffd28a', fontSize: 12, textAlign: 'center', marginBottom: 12 }}>
+            <Text style={{ color: THEME.warning, fontSize: 12, textAlign: 'center', marginBottom: 12 }}>
               Se te escucha bajito. Acercate al teléfono y grabá de nuevo: la voz clonada sale
               del principio de la grabación, así que si ahí suena flojo el cuento sale peor.
             </Text>
